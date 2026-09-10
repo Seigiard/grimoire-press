@@ -4,7 +4,11 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "node_modules/**", "playwright-report/**", "test-results/**"],
+    // pdfcheck.mjs is a standalone Node verification script (issue #4's PDF
+    // embedding check), run directly with `node`, never imported by the app
+    // or bundled by Vite -- it isn't part of what these app-focused lint
+    // rules (the DOM-global ban, the boundaries rule) are there to police.
+    ignores: ["dist/**", "node_modules/**", "playwright-report/**", "test-results/**", "pdfcheck.mjs"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

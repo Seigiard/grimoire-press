@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { MarkupError } from "../../src/core/markup-error";
 import { parseBook } from "../../src/core/parse-book";
+import { getTheme } from "../../src/core/themes/registry";
 
 /**
  * parseBook is pure, browser-free TypeScript -- it needs no browser oracle. The
@@ -108,5 +109,41 @@ describe("parseBook error paths", () => {
   it("names the line of an unclosed <Book>", () => {
     const source = ['<Book size="A5">', '<Section columns="1">', "Some prose.", "</Section>"].join("\n");
     expectMarkupErrorLine(source, 1);
+  });
+
+  it("names the line of an unknown theme attribute", () => {
+    const source = ['<Book theme="not-a-real-theme">', '<Section columns="1">', "Some prose.", "</Section>", "</Book>"].join(
+      "\n",
+    );
+    expectMarkupErrorLine(source, 1);
+  });
+});
+
+/**
+ * Consumer: render-book.ts, which embeds `parsed.theme`'s CSS and sets
+ * `<html lang>` from `parsed.lang`. The observable failure is parseBook
+ * resolving either field to something other than what `themes/registry.ts` --
+ * a different module, not parse-book.ts's own logic -- actually says
+ * "default-ru" is, or failing to fall back to a themeless, English-lang book
+ * when `<Book>` names no theme at all (issues #2/#3's books, which predate
+ * themes and must keep rendering unchanged).
+ */
+describe("parseBook theme resolution", () => {
+  it("resolves a named theme to the registry's own theme object and language", () => {
+    const source = ['<Book theme="default-ru">', '<Section columns="1">', "Some prose.", "</Section>", "</Book>"].join("\n");
+
+    const parsed = parseBook(source);
+
+    expect(parsed.theme).toBe(getTheme("default-ru"));
+    expect(parsed.lang).toBe("ru");
+  });
+
+  it("leaves a themeless book without a theme, defaulting to English", () => {
+    const source = ['<Book size="A5">', '<Section columns="1">', "Some prose.", "</Section>", "</Book>"].join("\n");
+
+    const parsed = parseBook(source);
+
+    expect(parsed.theme).toBeUndefined();
+    expect(parsed.lang).toBe("en");
   });
 });

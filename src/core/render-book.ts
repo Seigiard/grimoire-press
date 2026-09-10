@@ -10,20 +10,33 @@ import { renderProse } from "./prose-renderer";
  * Page size, columns, and forced breaks are expressed as CSS Paged Media -- `@page
  * size`, `column-count`, `break-before` -- laid out by Vivliostyle; nothing here
  * computes layout itself.
+ *
+ * A book's theme (issue #4), when it names one, is embedded the same way: its CSS
+ * -- including its own self-hosted `@font-face` rules -- lands verbatim in this
+ * `<style>` block, appended last so its rules win the cascade over the plain
+ * fallback above them. A themeless book keeps exactly the styling it had before
+ * themes existed.
  */
 export function renderBook(book: Book): string {
   const parsed = parseBook(book.source);
   const sectionsHtml = parsed.sections.map(renderSection).join("\n");
 
   return `<!doctype html>
-<html lang="en">
+<html lang="${parsed.lang}">
 <head>
 <meta charset="utf-8" />
 <title>Grimoire Press</title>
 <style>
   @page { size: ${parsed.size}; margin: 16mm; }
+  /* Hyphenation is a document-language concern, not a theme one -- CONTEXT.md
+     keeps the two separate ("the language attribute switches hyphenation").
+     Scoped to "ru" because that is the one case verified through the real
+     pagination/print engine (see the theme's own report); a theme's own
+     font-family rules are the only thing that ever selects a typeface. */
+  html[lang="ru"] { hyphens: auto; -webkit-hyphens: auto; }
   body { font-family: serif; line-height: 1.5; }
   section { column-gap: 8mm; }
+  ${parsed.theme?.css ?? ""}
 </style>
 </head>
 <body>
