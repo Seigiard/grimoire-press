@@ -51,6 +51,30 @@ const FONT_FACES = `
 `;
 
 /**
+ * Margin-box typography for the running header and page number (issue #5).
+ * Margin boxes are part of a book's visual identity -- the running header
+ * sits in the same display face as a heading, the page number in the same
+ * body face as running text -- so this theme owns it exactly the way it
+ * owns `h1`/`h2` and body typefaces below, rather than render-book.ts
+ * hardcoding one look for every theme. render-book.ts's own `@page` block
+ * only sets the plain-fallback face and size a themeless book keeps; this
+ * `@page` block cascades on top of it by the same append-last rule as
+ * every other themed CSS in this file.
+ */
+const MARGIN_BOX_CSS = `
+@page {
+  @top-center {
+    font-family: "Alegreya", cursive;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  @bottom-center {
+    font-family: "Vollkorn", serif;
+  }
+}
+`;
+
+/**
  * `lang: "ru"` is this theme's own declared language, not a book's. There is
  * currently no `<Book>` attribute that lets an author set or override a
  * book's language -- CONTEXT.md's "a theme may supply a default so the
@@ -65,5 +89,5 @@ const FONT_FACES = `
 export const defaultRuTheme: Theme = {
   name: "default-ru",
   lang: "ru",
-  css: FONT_FACES + magickCss,
+  css: FONT_FACES + magickCss + MARGIN_BOX_CSS,
 };
