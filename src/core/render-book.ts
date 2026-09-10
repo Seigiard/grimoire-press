@@ -43,7 +43,7 @@ export function renderBook(book: Book): string {
     /* content(): the heading's own rendered text, not a copy an author
        maintains -- see the string-set rule below. counter(page): the page
        counter every CSS UA maintains implicitly; nothing here counts pages. */
-    @top-center { content: string(section-title); }
+    @top-center { content: string(current-heading); }
     @bottom-center { content: counter(page); }
   }
   /* Running header mechanics (issue #5): string-set captures the nearest
@@ -59,7 +59,7 @@ export function renderBook(book: Book): string {
      -- unlike every other attribute in this file, this is derived, not
      declared, so parse-book.ts gains no new vocabulary and no new
      MarkupError case for it. */
-  h1, h2 { string-set: section-title content(); }
+  h1, h2 { string-set: current-heading content(); }
   /* Hyphenation is a document-language concern, not a theme one -- CONTEXT.md
      keeps the two separate ("the language attribute switches hyphenation").
      Scoped to "ru" because that is the one case verified through the real

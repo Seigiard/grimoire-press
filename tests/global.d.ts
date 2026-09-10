@@ -15,10 +15,16 @@ declare global {
     pageNumber: string | undefined;
   }
 
+  interface MarginBoxFontInspection {
+    topCenter: string | undefined;
+    bottomCenter: string | undefined;
+  }
+
   interface Window {
     __paginateBook: (source: string) => Promise<number>;
     __paginateAndInspect: (source: string) => Promise<PageInspection>;
     __paginateAndInspectHeaders: (source: string) => Promise<HeaderInspection[]>;
+    __inspectMarginBoxFonts: (source: string) => Promise<MarginBoxFontInspection>;
     __inspectFonts: (source: string, selectors: readonly string[]) => Promise<Record<string, string | undefined>>;
     __printTwiceSharesOneAttempt: (source: string) => boolean;
     __printSequentiallyStartsFreshAttempts: (source: string) => Promise<boolean>;

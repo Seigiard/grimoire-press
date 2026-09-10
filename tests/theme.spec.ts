@@ -65,4 +65,31 @@ test.describe("theme font resolution", () => {
 
     expect(fonts["body"]).not.toContain("Vollkorn");
   });
+
+  /**
+   * Consumer: a themed book's reader viewing the printed or previewed page,
+   * who expects the running header and the page number to carry the theme's
+   * own visual identity -- Alegreya for the header, Vollkorn for the page
+   * number -- matching how the theme already owns heading and body typography
+   * above. The observable failure is a real browser's own `getComputedStyle`
+   * resolving the actual rendered margin-box element to a font-family other
+   * than the theme declares -- the plain fallback leaking through, or the
+   * wrong face landing on the wrong box -- independent of theme.ts's own CSS
+   * text, since it is the browser's real cascade resolution of the
+   * Vivliostyle-rendered element, not a string comparison against the
+   * stylesheet this patch wrote. A margin box only exists once a real
+   * pagination pass has run (unlike `h1`/`p` above), so this reads it off
+   * `__inspectMarginBoxFonts`'s real Vivliostyle container rather than a
+   * plain srcdoc iframe.
+   */
+  test("a themed book's margin boxes resolve to the theme's own typefaces for the running header and the page number", async ({
+    page,
+  }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    const fonts = await page.evaluate((source) => window.__inspectMarginBoxFonts(source), THEMED_BOOK);
+
+    expect(fonts.topCenter).toContain("Alegreya");
+    expect(fonts.bottomCenter).toContain("Vollkorn");
+  });
 });
