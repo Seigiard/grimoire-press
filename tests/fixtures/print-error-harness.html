@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>print error path test harness</title>
+  </head>
+  <body>
+    <div id="editor"></div>
+    <div id="preview"></div>
+    <button id="print"></button>
+    <button id="refresh"></button>
+    <button id="download"></button>
+    <input id="load" type="file" />
+    <input id="auto-refresh" type="checkbox" checked />
+    <div id="status" hidden></div>
+    <script type="module">
+      import { startApp } from "/src/app/start-app.ts";
+      import { createEditor } from "/src/adapters/editor.ts";
+      import { downloadBook, loadBookFile } from "/src/adapters/file.ts";
+
+      // A fast, deterministic stand-in for pagination -- this harness is about
+      // the print button's own error paths, not pagination, so real Vivliostyle
+      // timing would only add noise here.
+      const fakePaginate = (container, html) => {
+        container.replaceChildren();
+        const div = document.createElement("div");
+        div.textContent = html;
+        container.appendChild(div);
+        return Promise.resolve({ pageCount: 1, pageSizes: [] });
+      };
+
+      // A print adapter that always rejects, standing in for a genuine
+      // Vivliostyle print-engine failure. Forcing the real engine to fail has no
+      // oracle independent of the engine itself (the same reasoning issue #2's
+      // review left as advisory for pagination's own reject path), so this
+      // seam -- the print adapter is a plain argument, exactly as issue #1's
+      // architecture designed for substitution -- is what makes the print
+      // button's own error handling provable at all.
+      const failingPrint = () => Promise.reject(new Error("Vivliostyle failed to prepare the book for printing: boom"));
+
+      const editorContainer = document.getElementById("editor");
+      const previewContainer = document.getElementById("preview");
+      const printControl = document.getElementById("print");
+      const refreshControl = document.getElementById("refresh");
+      const autoRefreshControl = document.getElementById("auto-refresh");
+      const statusContainer = document.getElementById("status");
+      const downloadControl = document.getElementById("download");
+      const loadControl = document.getElementById("load");
+
+      const editor = startApp(
+        {
+          editorContainer,
+          previewContainer,
+          printControl,
+          refreshControl,
+          autoRefreshControl,
+          statusContainer,
+          downloadControl,
+          loadControl,
+        },
+        createEditor,
+        fakePaginate,
+        failingPrint,
+        { read: () => undefined, write: () => {} },
+        downloadBook,
+        loadBookFile,
+      );
+
+      window.__editor = editor;
+    </script>
+  </body>
+</html>

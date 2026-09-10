@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>pagination test harness</title>
+  </head>
+  <body>
+    <div id="preview"></div>
+    <script type="module">
+      import { renderBook } from "/src/core/render-book.ts";
+      import { paginate } from "/src/adapters/pagination.ts";
+      import { printBook } from "/src/adapters/printing.ts";
+
+      // Issue #6's print seam: two print requests made back-to-back, with no
+      // await between them, so the second lands while the first is still in
+      // flight -- exactly the rapid-double-click case that used to repoint
+      // Vivliostyle's single shared print instance. Returns whether both calls
+      // returned the very same promise, which they do if and only if the second
+      // call joined the first instead of starting an independent one.
+      window.__printTwiceSharesOneAttempt = (source) => {
+        const html = renderBook({ source });
+        const first = printBook(html);
+        const second = printBook(html);
+        return first === second;
+      };
+
+      // Issue #6 review finding: the module-level `inFlight` guard that makes the
+      // above possible must also be cleared once an attempt settles, or every
+      // print after the very first one in a session would keep returning that
+      // first (already-settled) promise -- no fresh dialog would ever open again.
+      // Awaiting the first call in full, then making a second, is what proves the
+      // guard was actually released rather than merely set once.
+      window.__printSequentiallyStartsFreshAttempts = async (source) => {
+        const html = renderBook({ source });
+        const first = printBook(html);
+        await first;
+        const second = printBook(html);
+        return first !== second;
+      };
+
+      // Exposes the exact core+adapter seam issue #2 asks the test to exercise:
+      // a book's source in, a real-engine page count out. Nothing here asserts
+      // anything about markup shape or about Vivliostyle's own correctness.
+      window.__paginateBook = async (source) => {
+        const html = renderBook({ source });
+        const container = document.getElementById("preview");
+        const { pageCount } = await paginate(container, html);
+        return pageCount;
+      };
+
+      // Issue #3's seam: a book's source in, each rendered element's real on-page
+      // position and page index out (keyed by the source line render-book.ts tagged
+      // it with), plus the page count and each page's real rendered size. Tests read
+      // these to assert column placement and forced breaks through actual
+      // Vivliostyle layout, never by comparing against an expected markup string.
+      window.__paginateAndInspect = async (source) => {
+        const html = renderBook({ source });
+        const container = document.getElementById("preview");
+        const { pageCount, pageSizes } = await paginate(container, html);
+
+        // Vivliostyle pre-renders every page's content into the container, hiding
+        // the pages not currently shown; those hidden copies report empty client
+        // rects, so x/y is read from the one visible occurrence of each source
+        // line. Page identity has no such visibility gap: `closest` finds the
+        // nearest ancestor Vivliostyle marks with the page it belongs to (an
+        // internal attribute, not public API, but the only way to ask "which page
+        // is this on" without reimplementing Vivliostyle's own pagination) even
+        // while that page is hidden, so a forced page break is provable directly --
+        // the paragraph after it lands on a later page index -- not inferred from
+        // a page count that only shows a break happened somewhere.
+        const positions = {};
+        for (const el of container.querySelectorAll("[data-line]")) {
+          const line = el.getAttribute("data-line");
+          if (!(line in positions)) {
+            const pageEl = el.closest("[data-vivliostyle-page-index]");
+            const pageIndex = pageEl ? Number(pageEl.getAttribute("data-vivliostyle-page-index")) : null;
+            positions[line] = { pageIndex };
+          }
+
+          if (positions[line].x === undefined) {
+            const rects = el.getClientRects();
+            if (rects.length > 0) {
+              positions[line].x = rects[0].x;
+              positions[line].y = rects[0].y;
+            }
+          }
+        }
+
+        return { pageCount, pageSizes, positions };
+      };
+
+      // Issue #5's seam: a book's source in, each real page's running-header
+      // text and page-number text out, read from the actual margin-box
+      // elements Vivliostyle renders per page (`data-vivliostyle-page-margin-box`,
+      // an internal attribute, not public API, but the only way to read what a
+      // margin box actually resolved to without reimplementing Vivliostyle's own
+      // string-set/counter resolution). Unlike the `[data-line]` content nodes
+      // `__paginateAndInspect` reads, Vivliostyle gives each page exactly one
+      // `[data-vivliostyle-page-index]` ancestor, so no de-duplication is needed
+      // here.
+      window.__paginateAndInspectHeaders = async (source) => {
+        const html = renderBook({ source });
+        const container = document.getElementById("preview");
+        await paginate(container, html);
+
+        const pages = [];
+        for (const pageEl of container.querySelectorAll("[data-vivliostyle-page-index]")) {
+          const pageIndex = Number(pageEl.getAttribute("data-vivliostyle-page-index"));
+          const header = pageEl.querySelector('[data-vivliostyle-page-margin-box="top-center"]');
+          const pageNumber = pageEl.querySelector('[data-vivliostyle-page-margin-box="bottom-center"]');
+          pages.push({
+            pageIndex,
+            header: header ? header.textContent.trim() : undefined,
+            pageNumber: pageNumber ? pageNumber.textContent.trim() : undefined,
+          });
+        }
+        pages.sort((a, b) => a.pageIndex - b.pageIndex);
+        return pages;
+      };
+
+      // Issue #5's own theme claim: the running header and page number are
+      // theme-owned typography (see default-ru/theme.ts's MARGIN_BOX_CSS), the
+      // same claim issue #4's __inspectFonts below already proves for headings
+      // and body text. That helper reads a plain srcdoc iframe because font
+      // cascade for ordinary elements needs no real layout; a margin box only
+      // exists once Vivliostyle has actually paginated the document (it is not
+      // present in render-book.ts's own markup), so this reads computed style
+      // directly off the real per-page margin-box elements the pagination
+      // container above produces, in the same document -- no iframe needed,
+      // since the container already lives in this page.
+      window.__inspectMarginBoxFonts = async (source) => {
+        const html = renderBook({ source });
+        const container = document.getElementById("preview");
+        await paginate(container, html);
+
+        const topCenter = container.querySelector('[data-vivliostyle-page-margin-box="top-center"]');
+        const bottomCenter = container.querySelector('[data-vivliostyle-page-margin-box="bottom-center"]');
+        return {
+          topCenter: topCenter ? getComputedStyle(topCenter).fontFamily : undefined,
+          bottomCenter: bottomCenter ? getComputedStyle(bottomCenter).fontFamily : undefined,
+        };
+      };
+
+      // Issue #4's seam: a book's source in, real computed `font-family` values
+      // out, keyed by CSS selector. Loaded into an iframe (not the pagination
+      // container above) because font resolution and cascade order are a plain
+      // CSS/DOM concern, independent of Vivliostyle -- the iframe just needs a
+      // real browser to parse render-book.ts's exact `<style>` output and
+      // resolve the cascade, which is the actual thing under test.
+      window.__inspectFonts = async (source, selectors) => {
+        const html = renderBook({ source });
+        const iframe = document.createElement("iframe");
+        iframe.style.display = "none";
+        document.body.appendChild(iframe);
+        await new Promise((resolve) => {
+          iframe.onload = resolve;
+          iframe.srcdoc = html;
+        });
+        const doc = iframe.contentDocument;
+        const result = {};
+        for (const selector of selectors) {
+          const el = doc.querySelector(selector);
+          result[selector] = el ? iframe.contentWindow.getComputedStyle(el).fontFamily : undefined;
+        }
+        iframe.remove();
+        return result;
+      };
+    </script>
+  </body>
+</html>

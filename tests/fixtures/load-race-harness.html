@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>load-race test harness</title>
+  </head>
+  <body>
+    <div id="editor"></div>
+    <div id="preview"></div>
+    <button id="print"></button>
+    <button id="refresh"></button>
+    <button id="download"></button>
+    <input id="load" type="file" />
+    <input id="auto-refresh" type="checkbox" checked />
+    <div id="status" hidden></div>
+    <script type="module">
+      import { startApp } from "/src/app/start-app.ts";
+      import { createEditor } from "/src/adapters/editor.ts";
+      import { downloadBook } from "/src/adapters/file.ts";
+      import { paginate } from "/src/adapters/pagination.ts";
+      import { printBook } from "/src/adapters/printing.ts";
+
+      // A stand-in for the real file-load adapter, substituted at the exact seam
+      // issue #1's architecture designed for this. Its delay is keyed off the
+      // picked file's own name rather than real file-read timing, which is what
+      // proving the load-ordering defect needs: a controllable "slow" read and a
+      // controllable "fast" one, not a hope that a real slow read reliably
+      // outlasts a real fast one on every machine this suite runs on. What each
+      // file actually contains on disk is irrelevant here -- only its name
+      // selects the delay and the distinguishable source this resolves with --
+      // so the real JSON envelope this adapter would otherwise parse is never
+      // exercised by this harness at all.
+      const fakeLoadBookFile = (file) => {
+        const delay = file.name.includes("slow") ? 300 : 0;
+        const source = `# Loaded from ${file.name}\n\nContent from ${file.name}.\n`;
+        return new Promise((resolve) => setTimeout(() => resolve(source), delay));
+      };
+
+      const editorContainer = document.getElementById("editor");
+      const previewContainer = document.getElementById("preview");
+      const printControl = document.getElementById("print");
+      const refreshControl = document.getElementById("refresh");
+      const autoRefreshControl = document.getElementById("auto-refresh");
+      const statusContainer = document.getElementById("status");
+      const downloadControl = document.getElementById("download");
+      const loadControl = document.getElementById("load");
+
+      const editor = startApp(
+        {
+          editorContainer,
+          previewContainer,
+          printControl,
+          refreshControl,
+          autoRefreshControl,
+          statusContainer,
+          downloadControl,
+          loadControl,
+        },
+        createEditor,
+        paginate,
+        printBook,
+        { read: () => undefined, write: () => {} },
+        downloadBook,
+        fakeLoadBookFile,
+      );
+
+      window.__editor = editor;
+    </script>
+  </body>
+</html>

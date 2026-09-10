@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>print capture harness</title>
+  </head>
+  <body>
+    <script type="module">
+      import { renderBook } from "/src/core/render-book.ts";
+      import { printHTML } from "@vivliostyle/core";
+
+      // scripts/check-pdf.mjs's own probe -- NOT src/adapters/printing.ts's real
+      // print path, which that script cannot drive headlessly: window.print()
+      // opens the OS/browser's own print dialogue (ADR-0001), which has no
+      // programmatic, capturable result under Playwright. printHTML is the same
+      // Vivliostyle entry point printing.ts calls; this reads the fully paginated
+      // iframe's document instead of calling iframeWindow.print() on it. By the
+      // time printCallback fires, Vivliostyle has already resolved every
+      // string-set and counter(page) into literal text in that document -- the
+      // same resolution the preview shows -- so what check-pdf.mjs goes on to
+      // print from here needs no native `string-set` support from the browser
+      // that eventually rasterizes it (ADR-0002: plain Chrome never gets that).
+      //
+      // `documentElement.outerHTML` never includes the doctype -- it is the
+      // document element's own sibling, not part of it, not the document's
+      // rendering mode. Dropping it here would hand check-pdf.mjs's fresh page
+      // a doctype-less document, which Chromium renders in quirks mode, while
+      // production (this very iframe, printed in place) renders in standards
+      // mode: a check that had just been fixed to use the real engine would
+      // still be measuring the wrong rendering mode. Serializing the iframe's
+      // own `document.doctype` node keeps this faithful to whatever Vivliostyle
+      // actually produced, rather than assuming it is always `<!doctype html>`.
+      window.__renderPrintReadyHtml = (source) =>
+        new Promise((resolve, reject) => {
+          const html = renderBook({ source });
+          printHTML(html, {
+            title: "Grimoire Press",
+            printCallback: (iframeWindow) => {
+              const { doctype } = iframeWindow.document;
+              const doctypeHtml = doctype ? new XMLSerializer().serializeToString(doctype) : "";
+              resolve(doctypeHtml + iframeWindow.document.documentElement.outerHTML);
+            },
+            errorCallback: (message) => reject(new Error(message)),
+            hideIframe: true,
+            removeIframe: true,
+          });
+        });
+    </script>
+  </body>
+</html>

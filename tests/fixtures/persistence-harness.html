@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>persistence test harness</title>
+    <link rel="stylesheet" href="/src/app/app.css" />
+    <style>
+      body {
+        margin: 0;
+        display: flex;
+      }
+      #editor {
+        flex: 1;
+        overflow: auto;
+      }
+      #preview {
+        flex: 1;
+        overflow: auto;
+        border-left: 1px solid #ccc;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="editor"></div>
+    <div id="preview"></div>
+    <button id="print"></button>
+    <button id="refresh"></button>
+    <button id="download"></button>
+    <input id="load" type="file" />
+    <input id="auto-refresh" type="checkbox" checked />
+    <div id="status" hidden></div>
+    <script type="module">
+      import { startApp } from "/src/app/start-app.ts";
+      import { createEditor } from "/src/adapters/editor.ts";
+      import { downloadBook, loadBookFile } from "/src/adapters/file.ts";
+      import { paginate } from "/src/adapters/pagination.ts";
+      import { printBook } from "/src/adapters/printing.ts";
+      import { readDraft, createDebouncedPersist } from "/src/adapters/persistence.ts";
+
+      // Initialize the app with persistence
+      const editorContainer = document.getElementById("editor");
+      const previewContainer = document.getElementById("preview");
+      const printControl = document.getElementById("print");
+      const refreshControl = document.getElementById("refresh");
+      const autoRefreshControl = document.getElementById("auto-refresh");
+      const statusContainer = document.getElementById("status");
+      const downloadControl = document.getElementById("download");
+      const loadControl = document.getElementById("load");
+
+      const editor = startApp(
+        {
+          editorContainer,
+          previewContainer,
+          printControl,
+          refreshControl,
+          autoRefreshControl,
+          statusContainer,
+          downloadControl,
+          loadControl,
+        },
+        createEditor,
+        paginate,
+        printBook,
+        { read: readDraft, write: createDebouncedPersist() },
+        downloadBook,
+        loadBookFile,
+      );
+
+      window.__editor = editor;
+    </script>
+  </body>
+</html>
