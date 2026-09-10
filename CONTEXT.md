@@ -26,7 +26,20 @@ where the arrangement itself is the content: a character sheet, a reference card
 table meant to sit alone on its own page.
 
 A page is the exception. Text in a book flows through sections; a page opts out of that
-flow.
+flow. It sits beside a section rather than inside one, because a section is the flow a
+page opts out of.
+
+"Exactly one" is a claim the editor checks, not a hope. A section between two page
+breaks happens to occupy one page today and silently occupies two tomorrow when the
+author adds a line. A page that no longer fits on a page is reported to the author.
+
+A page may be turned landscape. It may not be a different size from the book: a book is
+bound at one format, and a rotated sheet is still that format while a larger one is a
+book nobody can bind.
+
+A page carries no running header. The header names where the reader is in the flow, and
+a page has left the flow, so on a page it would name somewhere the reader is not. The
+page number stays, because it is an address and the address is still true.
 
 ## Page break
 
