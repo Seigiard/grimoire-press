@@ -356,4 +356,27 @@ test.describe("a page can be turned while the book keeps its one size", () => {
       after: sheetForLine(measured, 9),
     }).toEqual({ before: sheet, theCard: sheet, after: sheet });
   });
+
+  test("a book bound the wide way has its one upright page turned back", async ({ page }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    // #given: a book bound landscape -- lengths, so the sheet has to be composed --
+    // with one page the author asked to stand upright
+    // #when: the real engine paginates it, and the same book with no card
+    const measured = await page.evaluate(
+      (source) => window.__paginateAndInspect(source),
+      proseAroundACard("160mm 90mm", '<Page orientation="portrait">'),
+    );
+    const bookAlone = await page.evaluate((source) => window.__paginateAndInspect(source), proseOnly("160mm 90mm"));
+
+    // #then: the card stands up while the book stays lying down -- the other way
+    // round from every case above, which is the only way to tell that the upright
+    // arm composes a sheet at all rather than sharing the landscape one's
+    const sheet = sheetOf(bookAlone, 0);
+    expect({
+      before: sheetForLine(measured, 3),
+      theCard: sheetForLine(measured, 5),
+      after: sheetForLine(measured, 9),
+    }).toEqual({ before: sheet, theCard: turned(sheet), after: sheet });
+  });
 });

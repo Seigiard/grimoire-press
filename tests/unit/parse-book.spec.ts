@@ -45,6 +45,31 @@ function expectMarkupError(source: string, line: number, message: RegExp): void 
 }
 
 describe("parseBook error paths", () => {
+  it("names the line of a size the renderer could not turn a page against", () => {
+    // #given: books bound at sizes CSS would take but a turned page cannot be
+    // composed from -- the whole point of refusing them here (line 1 each)
+    for (const size of ["auto", "A4 100mm", "1e2mm 2e2mm", "90mm 160mm 40mm"]) {
+      const source = [`<Book size="${size}">`, "<Page>", "A card.", "</Page>", "</Book>"].join("\n");
+
+      // #when: the book is parsed
+      // #then: the author is told on the line they wrote it, rather than the page
+      // silently staying upright because the engine discarded a size it could not
+      // read
+      expectMarkupError(source, 1, /has an invalid size attribute/);
+    }
+  });
+
+  it("takes the sizes a page can be turned against", () => {
+    // #given: the two shapes the renderer composes from
+    // #when: each is parsed
+    // #then: it is accepted, so tightening the vocabulary above did not take away a
+    // way an author was already binding a book
+    for (const size of ["A5", "A4 landscape", "100mm", "90mm 160mm"]) {
+      const source = [`<Book size="${size}">`, "<Page>", "A card.", "</Page>", "</Book>"].join("\n");
+      expect(parseBook(source).size).toBe(size);
+    }
+  });
+
   it("names the line of an invalid size attribute", () => {
     const source = ['<Book size="A5;bad">', '<Section columns="1">', "Some prose.", "</Section>", "</Book>"].join("\n");
     expectMarkupErrorLine(source, 1);

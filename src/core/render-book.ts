@@ -93,8 +93,15 @@ export function renderBook(book: Book): string {
   body { font-family: serif; line-height: 1.5; }
   section { column-gap: 8mm; }
   ${parsed.theme?.css ?? ""}
-  /* Last, so a page's own sheet wins over a theme's @page block the same way
-     every other rule in this file settles the cascade by its position. */
+  /* A named @page rule beats a theme's unnamed @page whatever the order, because
+     naming the page is more specific -- position is not what protects these, and
+     the file's usual last-wins reading does not apply to them. Kept last anyway,
+     so a later theme cannot look like it is meant to override them.
+
+     What position does not settle: a theme that declared a page size of its own
+     would take the book's, while a turned page is still composed from the size
+     the book declared, so the two would describe different sheets. No theme does
+     today. Issue #28 carries it. */
   ${pageRules}
 </style>
 </head>

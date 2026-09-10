@@ -85,7 +85,26 @@ export interface ParsedBook {
   readonly blocks: readonly BookBlock[];
 }
 
-const VALID_SIZE = /^[A-Za-z0-9.\s]+$/;
+/**
+ * The sizes a book may be bound at, which is narrower than what CSS's own `@page
+ * size` accepts. Two shapes only: a named page size with an optional orientation
+ * word (`A5`, `A4 landscape`), or one or two absolute lengths (`100mm`, `90mm
+ * 160mm`).
+ *
+ * Narrow because `render-book.ts` composes a turned page's sheet out of this
+ * (issue #22), and it can only turn a size it can read. Anything else -- `auto`,
+ * three tokens, a name followed by a length, an exponent -- used to be accepted
+ * here and then quietly produced a `size` the engine discards, so the page stayed
+ * upright and nothing told the author why. Refusing it names the line instead.
+ *
+ * `auto` is refused with the rest: a book is bound at one format, and `auto` names
+ * no format for a page to be turned against.
+ */
+const LENGTH = String.raw`\d*\.?\d+(?:mm|cm|in|q|pt|pc|px)`;
+const VALID_SIZE = new RegExp(
+  String.raw`^(?:(?!auto\b)[A-Za-z][A-Za-z0-9-]*(?:\s+(?:portrait|landscape))?|${LENGTH}(?:\s+${LENGTH})?)$`,
+  "i",
+);
 
 /** The source, split into lines, plus which of those lines are fenced code and so
  * can never carry a tag -- threaded through every scanning function below instead
