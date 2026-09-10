@@ -14,12 +14,26 @@ export interface PaginationResult {
  */
 export function paginate(container: HTMLElement, html: string): Promise<PaginationResult> {
   return new Promise((resolve, reject) => {
+    // Each call creates a fresh CoreViewer rather than reloading an existing one, so
+    // a stale render from the previous call must be cleared first: CoreViewer appends
+    // to the viewport element, it does not replace what a prior instance left there.
+    container.replaceChildren();
     const viewer = new CoreViewer({ viewportElement: container });
     const blobUrl = URL.createObjectURL(new Blob([html], { type: "text/html" }));
 
+    // The 'loaded' event's own payload carries no epageCount (it is just {type:
+    // "loaded"}); the count arrives on 'nav' events instead, dispatched once per
+    // navigation and again as background rendering updates each page's count. The
+    // last 'nav' seen before 'loaded' fires is the total once renderAllPages (the
+    // default) has finished laying out every page.
+    let latestEpageCount: number | undefined;
+
+    const onNav = (payload: Payload): void => {
+      latestEpageCount = payload.epageCount;
+    };
     const onLoaded = (payload: Payload): void => {
       cleanup();
-      resolve({ pageCount: payload.epageCount });
+      resolve({ pageCount: latestEpageCount ?? payload.epageCount });
     };
     const onError = (payload: Payload): void => {
       cleanup();
@@ -27,10 +41,12 @@ export function paginate(container: HTMLElement, html: string): Promise<Paginati
     };
     const cleanup = (): void => {
       URL.revokeObjectURL(blobUrl);
+      viewer.removeListener("nav", onNav);
       viewer.removeListener("loaded", onLoaded);
       viewer.removeListener("error", onError);
     };
 
+    viewer.addListener("nav", onNav);
     viewer.addListener("loaded", onLoaded);
     viewer.addListener("error", onError);
     viewer.loadDocument(blobUrl);
