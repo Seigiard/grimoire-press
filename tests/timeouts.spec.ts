@@ -22,6 +22,22 @@ const THIRD_GOOD_SOURCE = [
   "</Book>",
 ].join("\n");
 
+/** A book long enough that the engine is still laying it out several seconds in, so a
+ * bound can be made to fire while a run is genuinely mid-layout rather than before it
+ * has started. Set through the editor handle rather than typed: 1500 paragraphs is a
+ * minute of keystrokes and none of them are what the test is about. */
+const LONG_BOOK_MARKER = "Paragraph 0 of a book the engine is still laying out";
+const LONG_SOURCE = [
+  '<Book size="A5">',
+  '<Section columns="1">',
+  ...Array.from(
+    { length: 1500 },
+    (_, i) => `Paragraph ${i} of a book the engine is still laying out, with enough words in it to take real time.\n`,
+  ),
+  "</Section>",
+  "</Book>",
+].join("\n");
+
 async function replaceSource(page: import("@playwright/test").Page, source: string): Promise<void> {
   await page.locator(".cm-editor").click();
   await page.keyboard.press("ControlOrMeta+A");
@@ -39,6 +55,19 @@ async function firstPaint(page: import("@playwright/test").Page): Promise<void> 
  * "the engine is not answering" a fact rather than a hope about timing. */
 async function withheldRuns(page: import("@playwright/test").Page): Promise<number> {
   return page.evaluate(() => window.__stalledEngineRuns());
+}
+
+/** The preview container's own attributes -- the oracle tests/pagination.spec.ts uses
+ * for the sibling error path. `innerHTML` serializes descendants only and never sees
+ * an attribute on the container itself, so the engine's own bookkeeping (which it
+ * writes onto the container, not into it) is invisible to it. */
+async function previewAttributes(page: import("@playwright/test").Page): Promise<string> {
+  return page.evaluate(() =>
+    [...document.getElementById("preview")!.attributes]
+      .map((attribute) => `${attribute.name}=${attribute.value}`)
+      .sort()
+      .join("\n"),
+  );
 }
 
 /**
@@ -90,21 +119,27 @@ test.describe("a repaint the engine never answers", () => {
     await replaceSource(page, GOOD_SOURCE);
     await expect.poll(() => page.locator("#preview").textContent()).toContain("A good paragraph appears here.");
     const lastGood = await page.locator("#preview").innerHTML();
+    const lastGoodAttributes = await previewAttributes(page);
+    expect(lastGoodAttributes).toContain("data-vivliostyle-viewer-status=complete");
 
     // #when: the next repaint empties the preview and then goes unanswered for its
-    // whole bound. The preview being genuinely blank at this point is what makes the
-    // assertion below about restoring rather than about never having emptied.
+    // whole bound. The preview being genuinely blank at this point, and the container
+    // itself genuinely describing the new run, is what makes the assertions below
+    // about restoring rather than about nothing having happened.
     await page.evaluate(() => window.__stallEngine());
     await replaceSource(page, OTHER_GOOD_SOURCE);
     await expect.poll(() => withheldRuns(page)).toBe(1);
     expect(await page.locator("#preview").textContent()).not.toContain("A good paragraph appears here.");
+    expect(await previewAttributes(page)).toContain("data-vivliostyle-viewer-status=loading");
 
     await page.evaluate(() => window.__advanceEngineClock(30_000));
     await expect(page.locator("#status")).toBeVisible();
 
-    // #then: the preview holds exactly the book it held on the way in -- markup and
-    // attributes both, the same all-or-nothing ADR-0005 records for a failed run
+    // #then: the preview holds exactly the book it held on the way in -- its markup,
+    // and the container's own attributes, the same all-or-nothing ADR-0005 records
+    // for a failed run
     expect(await page.locator("#preview").innerHTML()).toBe(lastGood);
+    expect(await previewAttributes(page)).toBe(lastGoodAttributes);
   });
 
   test("does not wedge the repaint queue: the next edit paints", async ({ page }) => {
@@ -146,8 +181,11 @@ test.describe("a repaint the engine never answers", () => {
     // #when: the engine finally answers about the abandoned run -- the work could
     // not be called off, so this is the real event arriving for a book nobody is
     // waiting for any more
+    // CoreViewer's own event target calls its listeners inline, and the handler that
+    // would put the stale book back writes to the container inline too, so by the
+    // time this call has returned the damage is either done or it is not. There is
+    // nothing to wait for, and a wait would only be waiting on nothing.
     expect(await page.evaluate(() => window.__failOldestStalledEngineRun())).toBe(true);
-    await page.waitForTimeout(300);
 
     // #then: the preview is still the newest book, not the one the abandoned run
     // was holding on to, and nothing is reported about a book that is no longer
@@ -156,6 +194,61 @@ test.describe("a repaint the engine never answers", () => {
     expect(preview).toContain("A third paragraph appears here.");
     expect(preview).not.toContain("A good paragraph appears here.");
     await expect(page.locator("#status")).toBeHidden();
+  });
+});
+
+/**
+ * What an abandoned run actually goes on to do, pinned rather than assumed. The bound
+ * is deliberately generous, which means it is meant to fire on books that are still
+ * laying out, so this case is reachable by construction rather than exotic. Half of
+ * the outcome is good and half is not, and the not-good half is issue #15: nothing in
+ * this application can call the engine off, and `removeListener` only detaches the
+ * adapter's handlers from the viewer's event target -- the object writing to the
+ * container is the viewer's internal one, and nothing detaches that. A staging
+ * container is what closes it, and that is a decision with its own cost (ADR-0005).
+ */
+test.describe("a repaint abandoned while the engine was mid-layout", () => {
+  test("keeps its pages out of the preview, but goes on stamping the container itself (issue #15)", async ({ page }) => {
+    test.setTimeout(90_000);
+
+    // #given: a book on screen, and a much longer one the engine is part-way through
+    await firstPaint(page);
+    await page.evaluate((source) => window.__editor!.setSource(source), GOOD_SOURCE);
+    await expect.poll(() => page.locator("#preview").textContent()).toContain("A good paragraph appears here.");
+
+    await page.evaluate((source) => window.__editor!.setSource(source), LONG_SOURCE);
+    await expect
+      .poll(() => page.evaluate(() => document.querySelectorAll("#preview [data-vivliostyle-page-index]").length), {
+        timeout: 30_000,
+      })
+      .toBeGreaterThan(5);
+    // Pages of the new book are on screen and the call has still not settled: this run
+    // is genuinely mid-layout, not merely started.
+    expect(await page.evaluate(() => window.__pendingEngineDeadlines())).toBe(1);
+
+    // #when: the bound fires there. The engine's own stamp is taken off the container
+    // in the same task, so that its coming back can only be the abandoned run writing.
+    await page.evaluate(() => {
+      window.__advanceEngineClock(30_000);
+      document.getElementById("preview")!.removeAttribute("data-vivliostyle-viewer-status");
+    });
+    await expect(page.locator("#status")).toBeVisible();
+
+    // #then: the run does come back and write to the live container -- this is the
+    // defect, recorded rather than claimed away
+    await expect
+      .poll(() => page.evaluate(() => document.getElementById("preview")!.getAttribute("data-vivliostyle-viewer-status")), {
+        timeout: 30_000,
+      })
+      .not.toBeNull();
+
+    // #then: and its pages never arrive, because the restore took the engine's own
+    // viewport subtree out of the document with the rest of the children, and a
+    // detached element has no geometry to lay out against (ADR-0005) -- the run halts
+    // where it stands, writing into a subtree nobody can see
+    const preview = await page.locator("#preview").textContent();
+    expect(preview).toContain("A good paragraph appears here.");
+    expect(preview).not.toContain(LONG_BOOK_MARKER);
   });
 });
 
@@ -218,6 +311,31 @@ test.describe("a print the engine never answers", () => {
     await expect(page.locator("#status")).toBeHidden();
   });
 
+  test("does not open a dialogue over the author when the engine answers for it later", async ({ page }) => {
+    // #given: a print given up on, with no dialogue opened for it
+    await firstPaint(page);
+    await page.evaluate(() => window.__stallEngine());
+    await page.locator("#print").click();
+    await expect.poll(() => withheldRuns(page)).toBe(1);
+    await page.evaluate(() => window.__advanceEngineClock(60_000));
+    await expect.poll(() => page.locator("#status").textContent()).toContain("Printing failed");
+    expect(await page.evaluate(() => window.__printDialoguesOpened())).toBe(0);
+
+    // #when: the abandoned attempt's engine lays the whole book out after all and
+    // calls back to have it printed -- a real success, arriving for a print the
+    // author gave up on a minute ago
+    expect(await page.evaluate(() => window.__resumeOldestStalledEngineRun())).toBe(true);
+    // `printHTML` removes an attempt's iframe once that attempt has run to the end,
+    // so the count dropping is the abandoned attempt reporting that its whole success
+    // path -- the print callback included -- has now run.
+    await expect.poll(() => page.evaluate(() => window.__printAttemptsStarted()), { timeout: 30_000 }).toBe(0);
+
+    // #then: the browser's own modal was not opened over whatever the author has
+    // moved on to. Settling twice is a harmless no-op; opening a dialogue is not,
+    // and it happens on the line before the resolve.
+    expect(await page.evaluate(() => window.__printDialoguesOpened())).toBe(0);
+  });
+
   test("cannot take the guard from the print that replaced it when the engine answers later", async ({ page }) => {
     // #given: a print given up on, and a second one the author started in its place
     // and which is still waiting on the engine
@@ -234,10 +352,11 @@ test.describe("a print the engine never answers", () => {
 
     // #when: the abandoned print's engine finally answers, for an attempt nobody is
     // waiting for, and the author clicks print once more
+    // Both steps land inline: CoreViewer dispatches to its listeners synchronously,
+    // and `printHTML` appends an attempt's iframe in its own constructor, so a click
+    // that started a print of its own has already done so by the time it returns.
     expect(await page.evaluate(() => window.__failOldestStalledEngineRun())).toBe(true);
-    await page.waitForTimeout(300);
     await page.locator("#print").click();
-    await page.waitForTimeout(300);
 
     // #then: that click joined the print still in flight rather than starting a
     // third one alongside it -- the dead attempt did not hand the guard away on its

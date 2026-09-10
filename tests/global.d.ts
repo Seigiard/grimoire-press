@@ -47,6 +47,7 @@ declare global {
     __resumeOldestStalledEngineRun: () => boolean;
     __failOldestStalledEngineRun: () => boolean;
     __printAttemptsStarted: () => number;
+    __printDialoguesOpened: () => number;
     __printSequentiallyStartsFreshAttempts: (source: string) => Promise<boolean>;
     __editor?: EditorHandle;
     __writeCount: number;
