@@ -179,12 +179,16 @@ export function paginate(container: HTMLElement, html: string): Promise<Paginati
  * own styling -- so the engine will not prevent this and "exactly one page" stays
  * ours to check.
  *
- * The check is a count. `render-book.ts` gives a page's own element the `page`
- * class and the source line it was declared on, the same `data-line` every rendered
- * block already carries for cursor synchronisation; the engine renders a block once
- * per physical page it occupies, inside that page's own container. So a page that
- * fits appears under one page index and a page that spilled appears under several,
- * and the number of distinct indices is the number of pages it took.
+ * The check is a count. `render-book.ts` marks a page's own element with
+ * `data-grimoire-page`, beside the source line it was declared on; the engine
+ * renders a block once per physical page it occupies, inside that page's own
+ * container. So a page that fits appears under one page index and a page that
+ * spilled appears under several, and the number of distinct indices is the number
+ * of pages it took.
+ *
+ * The mark, and not the `page` class or `data-line` alone: a book may contain raw
+ * HTML (ADR-0006), so an author writing either of those by hand would otherwise
+ * make their own book report an overflow that never happened.
  *
  * Nothing here rejects, and the caller is handed this beside the page count rather
  * than instead of it: the book paginated, and an author deciding what to cut needs
@@ -193,13 +197,16 @@ export function paginate(container: HTMLElement, html: string): Promise<Paginati
 function findOverflowingPages(container: HTMLElement): OverflowingPage[] {
   const physicalPagesByLine = new Map<number, Set<number>>();
 
-  for (const element of container.querySelectorAll("div.page[data-line]")) {
+  for (const element of container.querySelectorAll("[data-grimoire-page][data-line]")) {
     const line = Number(element.getAttribute("data-line"));
     const physicalPage = element.closest("[data-vivliostyle-page-index]");
     if (!Number.isInteger(line) || physicalPage === null) continue;
 
+    const index = Number(physicalPage.getAttribute("data-vivliostyle-page-index"));
+    if (!Number.isInteger(index)) continue;
+
     const indices = physicalPagesByLine.get(line) ?? new Set<number>();
-    indices.add(Number(physicalPage.getAttribute("data-vivliostyle-page-index")));
+    indices.add(index);
     physicalPagesByLine.set(line, indices);
   }
 

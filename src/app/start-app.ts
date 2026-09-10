@@ -13,22 +13,6 @@ const INITIAL_SOURCE = "# Untitled book\n\nStart writing your book here.\n";
 const REFRESH_DEBOUNCE_MS = 400;
 
 /**
- * What an author reads when a page took more than the one physical page it claims
- * (issue #23). Names the line the page was declared on, so the author can go
- * straight to it, and how many pages it actually took, so they know how much there
- * is to cut. Every overflowing page in the book is named: a book with two character
- * sheets that both spilled has two problems, not one.
- *
- * Worded here rather than in `preview-error.ts` because this is not one of that
- * file's error cases and must not become one -- the book paginated.
- */
-function describeOverflowingPages(pages: readonly OverflowingPage[]): string {
-  const heading = pages.length === 1 ? "A page did not fit" : "Some pages did not fit";
-  const detail = pages.map((page) => `line ${page.line} took ${page.pages} pages`).join("; ");
-  return `${heading} — ${detail}.`;
-}
-
-/**
  * The DOM elements the app is wired to. Bundled as one named record rather than
  * positional parameters: most of them share the same `HTMLElement` type, so
  * transposing two at a call site would compile cleanly and only fail at runtime.
@@ -331,4 +315,20 @@ export function startApp(
   requestRepaint(initialSource);
 
   return editor;
+}
+
+/**
+ * What an author reads when a page took more than the one physical page it claims
+ * (issue #23). Names the line the page was declared on, so the author can go
+ * straight to it, and how many pages it actually took, so they know how much there
+ * is to cut. Every overflowing page in the book is named: a book with two character
+ * sheets that both spilled has two problems, not one.
+ *
+ * Worded here rather than in `preview-error.ts` because this is not one of that
+ * file's error cases and must not become one -- the book paginated.
+ */
+function describeOverflowingPages(pages: readonly OverflowingPage[]): string {
+  const heading = pages.length === 1 ? "A page did not fit" : "Some pages did not fit";
+  const detail = pages.map((page) => `line ${page.line} took ${page.pages} pages`).join("; ");
+  return `${heading} — ${detail}.`;
 }
