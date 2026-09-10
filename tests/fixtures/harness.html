@@ -19,6 +19,47 @@
         const { pageCount } = await paginate(container, html);
         return pageCount;
       };
+
+      // Issue #3's seam: a book's source in, each rendered element's real on-page
+      // position and page index out (keyed by the source line render-book.ts tagged
+      // it with), plus the page count and each page's real rendered size. Tests read
+      // these to assert column placement and forced breaks through actual
+      // Vivliostyle layout, never by comparing against an expected markup string.
+      window.__paginateAndInspect = async (source) => {
+        const html = renderBook({ source });
+        const container = document.getElementById("preview");
+        const { pageCount, pageSizes } = await paginate(container, html);
+
+        // Vivliostyle pre-renders every page's content into the container, hiding
+        // the pages not currently shown; those hidden copies report empty client
+        // rects, so x/y is read from the one visible occurrence of each source
+        // line. Page identity has no such visibility gap: `closest` finds the
+        // nearest ancestor Vivliostyle marks with the page it belongs to (an
+        // internal attribute, not public API, but the only way to ask "which page
+        // is this on" without reimplementing Vivliostyle's own pagination) even
+        // while that page is hidden, so a forced page break is provable directly --
+        // the paragraph after it lands on a later page index -- not inferred from
+        // a page count that only shows a break happened somewhere.
+        const positions = {};
+        for (const el of container.querySelectorAll("[data-line]")) {
+          const line = el.getAttribute("data-line");
+          if (!(line in positions)) {
+            const pageEl = el.closest("[data-vivliostyle-page-index]");
+            const pageIndex = pageEl ? Number(pageEl.getAttribute("data-vivliostyle-page-index")) : null;
+            positions[line] = { pageIndex };
+          }
+
+          if (positions[line].x === undefined) {
+            const rects = el.getClientRects();
+            if (rects.length > 0) {
+              positions[line].x = rects[0].x;
+              positions[line].y = rects[0].y;
+            }
+          }
+        }
+
+        return { pageCount, pageSizes, positions };
+      };
     </script>
   </body>
 </html>
