@@ -15,6 +15,19 @@ draft written to the browser's local storage.
 One string and one flag do not need a state manager. The chain from an edit to a repainted
 preview is a single function, called from the editor's own update listener.
 
+## Amendment: refresh scheduling (issue #6)
+
+The chain above is no longer quite one function: a repaint now waits for typing to pause,
+and a request made while one is already running is coalesced into whatever comes next
+rather than started alongside it, so `start-app.ts` also carries a debounce timer handle, an
+in-flight flag, and one pending source string. This is scheduling state, not model state --
+none of it is derived reactively from something else changing, none of it survives past the
+repaint it belongs to, and none of it is read from anywhere but the one closure that owns
+it. It is exactly the kind of wiring this ADR already anticipated writing by hand; it does
+not reopen the question above, because a state library's one advantage here was still
+automatic recomputation from a changing source, and nothing about scheduling a queue of one
+pending request calls for that.
+
 ## Considered options
 
 **A state library.** Nanostores is mature and costs 265 bytes, so the objection is not its

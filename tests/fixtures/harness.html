@@ -9,6 +9,34 @@
     <script type="module">
       import { renderBook } from "/src/core/render-book.ts";
       import { paginate } from "/src/adapters/pagination.ts";
+      import { printBook } from "/src/adapters/printing.ts";
+
+      // Issue #6's print seam: two print requests made back-to-back, with no
+      // await between them, so the second lands while the first is still in
+      // flight -- exactly the rapid-double-click case that used to repoint
+      // Vivliostyle's single shared print instance. Returns whether both calls
+      // returned the very same promise, which they do if and only if the second
+      // call joined the first instead of starting an independent one.
+      window.__printTwiceSharesOneAttempt = (source) => {
+        const html = renderBook({ source });
+        const first = printBook(html);
+        const second = printBook(html);
+        return first === second;
+      };
+
+      // Issue #6 review finding: the module-level `inFlight` guard that makes the
+      // above possible must also be cleared once an attempt settles, or every
+      // print after the very first one in a session would keep returning that
+      // first (already-settled) promise -- no fresh dialog would ever open again.
+      // Awaiting the first call in full, then making a second, is what proves the
+      // guard was actually released rather than merely set once.
+      window.__printSequentiallyStartsFreshAttempts = async (source) => {
+        const html = renderBook({ source });
+        const first = printBook(html);
+        await first;
+        const second = printBook(html);
+        return first !== second;
+      };
 
       // Exposes the exact core+adapter seam issue #2 asks the test to exercise:
       // a book's source in, a real-engine page count out. Nothing here asserts
