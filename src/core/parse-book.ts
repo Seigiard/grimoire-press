@@ -1,6 +1,6 @@
 import { DEFAULT_PAGE_SIZE } from "./book";
 import { MarkupError } from "./markup-error";
-import { describeTag, matchTagLine, TagLine } from "./markup-tags";
+import { describeTag, fencedCodeLines, matchTagLine, TagLine } from "./markup-tags";
 
 /** A run of Markdown prose, and the 1-based source line it starts on. */
 export interface ProseBlock {
@@ -37,6 +37,19 @@ export interface ParsedBook {
 
 const VALID_SIZE = /^[A-Za-z0-9.\s]+$/;
 
+/** The source, split into lines, plus which of those lines are fenced code and so
+ * can never carry a tag -- threaded through every scanning function below instead
+ * of recomputed per call. */
+interface Doc {
+  readonly lines: readonly string[];
+  readonly fenced: ReadonlySet<number>;
+}
+
+/** The tag at line `i`, or `undefined` for prose -- fenced code is never a tag. */
+function tagAt(doc: Doc, i: number): TagLine | undefined {
+  return doc.fenced.has(i) ? undefined : matchTagLine(doc.lines[i]!);
+}
+
 /**
  * Turns a book's source into its structure: a page size and the sections that make
  * it up. A `<Book>` wrapper is optional -- plain Markdown with no tags at all is a
@@ -51,21 +64,31 @@ const VALID_SIZE = /^[A-Za-z0-9.\s]+$/;
  */
 export function parseBook(source: string): ParsedBook {
   const lines = source.split("\n");
-  const bookOpenIndex = lines.findIndex((line) => matchTagLine(line)?.kind === "book-open");
+  const doc: Doc = { lines, fenced: fencedCodeLines(lines) };
 
-  if (bookOpenIndex === -1) {
-    return { size: DEFAULT_PAGE_SIZE, sections: parseBookBody(lines, 0, lines.length) };
+  let bookOpenIndex = -1;
+  let bookOpen: Extract<TagLine, { kind: "book-open" }> | undefined;
+  for (let i = 0; i < lines.length; i++) {
+    const tag = tagAt(doc, i);
+    if (tag?.kind === "book-open") {
+      bookOpenIndex = i;
+      bookOpen = tag;
+      break;
+    }
   }
 
-  assertOnlyBlank(lines, 0, bookOpenIndex, "before <Book>");
+  if (bookOpen === undefined) {
+    return { size: DEFAULT_PAGE_SIZE, sections: parseBookBody(doc, 0, lines.length) };
+  }
 
-  const bookOpen = matchTagLine(lines[bookOpenIndex]!) as Extract<TagLine, { kind: "book-open" }>;
-  const bookCloseIndex = findMatchingClose(lines, bookOpenIndex + 1, lines.length, "book-open", "book-close", "Book");
-  assertOnlyBlank(lines, bookCloseIndex + 1, lines.length, "after </Book>");
+  assertOnlyBlank(doc, 0, bookOpenIndex, "before <Book>");
+
+  const bookCloseIndex = findMatchingClose(doc, bookOpenIndex + 1, lines.length, "book-open", "book-close", "Book");
+  assertOnlyBlank(doc, bookCloseIndex + 1, lines.length, "after </Book>");
 
   return {
     size: resolveSize(bookOpen.size, bookOpenIndex),
-    sections: parseBookBody(lines, bookOpenIndex + 1, bookCloseIndex),
+    sections: parseBookBody(doc, bookOpenIndex + 1, bookCloseIndex),
   };
 }
 
@@ -82,22 +105,28 @@ function resolveSize(size: string | undefined, tagLine: number): string {
  * section; content with at least one `<Section>` tag is parsed strictly, since mixing
  * the two within one scope would leave prose with no declared column count.
  */
-function parseBookBody(lines: readonly string[], from: number, to: number): Section[] {
-  const hasSection = lines.slice(from, to).some((line) => matchTagLine(line)?.kind === "section-open");
-  if (!hasSection) {
-    return [{ columns: 1, line: from + 1, content: parseSectionContent(lines, from, to) }];
+function parseBookBody(doc: Doc, from: number, to: number): Section[] {
+  let hasSection = false;
+  for (let i = from; i < to; i++) {
+    if (tagAt(doc, i)?.kind === "section-open") {
+      hasSection = true;
+      break;
+    }
   }
-  return parseSections(lines, from, to);
+  if (!hasSection) {
+    return [{ columns: 1, line: from + 1, content: parseSectionContent(doc, from, to) }];
+  }
+  return parseSections(doc, from, to);
 }
 
-function parseSections(lines: readonly string[], from: number, to: number): Section[] {
+function parseSections(doc: Doc, from: number, to: number): Section[] {
   const sections: Section[] = [];
   let i = from;
 
   while (i < to) {
-    const tag = matchTagLine(lines[i]!);
+    const tag = tagAt(doc, i);
     if (tag === undefined) {
-      if (lines[i]!.trim() === "") {
+      if (doc.lines[i]!.trim() === "") {
         i++;
         continue;
       }
@@ -111,11 +140,11 @@ function parseSections(lines: readonly string[], from: number, to: number): Sect
     }
 
     const sectionLine = i;
-    const closeIndex = findMatchingClose(lines, i + 1, to, "section-open", "section-close", "Section");
+    const closeIndex = findMatchingClose(doc, i + 1, to, "section-open", "section-close", "Section");
     sections.push({
       columns: resolveColumns(tag.columns, sectionLine),
       line: sectionLine + 1,
-      content: parseSectionContent(lines, sectionLine + 1, closeIndex),
+      content: parseSectionContent(doc, sectionLine + 1, closeIndex),
     });
     i = closeIndex + 1;
   }
@@ -135,7 +164,7 @@ function resolveColumns(columns: string | undefined, tagLine: number): number {
   return parsed;
 }
 
-function parseSectionContent(lines: readonly string[], from: number, to: number): SectionContent[] {
+function parseSectionContent(doc: Doc, from: number, to: number): SectionContent[] {
   const content: SectionContent[] = [];
   let buffer: string[] = [];
   let bufferStart: number | null = null;
@@ -152,8 +181,8 @@ function parseSectionContent(lines: readonly string[], from: number, to: number)
   };
 
   for (let i = from; i < to; i++) {
-    const line = lines[i]!;
-    const tag = matchTagLine(line);
+    const line = doc.lines[i]!;
+    const tag = tagAt(doc, i);
 
     if (tag?.kind === "page-break" || tag?.kind === "column-break") {
       flush();
@@ -172,16 +201,16 @@ function parseSectionContent(lines: readonly string[], from: number, to: number)
   return content;
 }
 
-function assertOnlyBlank(lines: readonly string[], from: number, to: number, where: string): void {
+function assertOnlyBlank(doc: Doc, from: number, to: number, where: string): void {
   for (let i = from; i < to; i++) {
-    if (lines[i]!.trim() !== "") {
+    if (doc.lines[i]!.trim() !== "") {
       throw new MarkupError(`content on line ${i + 1} appears ${where}`, i + 1);
     }
   }
 }
 
 function findMatchingClose(
-  lines: readonly string[],
+  doc: Doc,
   from: number,
   to: number,
   openKind: TagLine["kind"],
@@ -189,7 +218,7 @@ function findMatchingClose(
   tagName: string,
 ): number {
   for (let i = from; i < to; i++) {
-    const tag = matchTagLine(lines[i]!);
+    const tag = tagAt(doc, i);
     if (tag?.kind === openKind) {
       throw new MarkupError(`<${tagName}> cannot be nested inside another <${tagName}>`, i + 1);
     }

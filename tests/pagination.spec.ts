@@ -39,40 +39,54 @@ test.describe("pagination", () => {
 const shortSection = (size: string) =>
   [`<Book size="${size}">`, '<Section columns="1">', "Some prose.", "</Section>", "</Book>"].join("\n");
 
-const paragraph = (n: number) => `Paragraph ${n} with a little more text so it takes up real vertical space in its column.`;
-
-const twoColumnSource = (columns: number) =>
-  [`<Book size="A5">`, `<Section columns="${columns}">`, paragraph(1), "", paragraph(2), "", paragraph(3), "", paragraph(4), "</Section>", "</Book>"].join(
-    "\n",
+// A repeated sentence, long enough that a handful of these paragraphs overflow one
+// column's height and spill into the next -- real overflow forcing the spread
+// across columns, not a height-balancing heuristic that the engine could apply
+// differently depending on font metrics.
+const bigParagraph = (n: number) =>
+  `Paragraph ${n}. ` +
+  "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. ".repeat(
+    2,
   );
 
-const noPageBreak = ["# A cheat sheet", "", "One short paragraph of prose.", "", "Another short paragraph of prose."].join("\n");
-const withPageBreak = ["# A cheat sheet", "", "One short paragraph of prose.", "", "<PageBreak />", "", "Another short paragraph of prose."].join("\n");
-
-// Four paragraphs (rather than two) so that, left to natural column balancing,
-// paragraph 2 shares column 1 with paragraph 1 -- only a forced break moves it on.
-const columnBreakSource = (withBreak: boolean) =>
+const overflowSource = (columns: number, count: number) =>
   [
     '<Book size="A5">',
-    '<Section columns="2">',
-    paragraph(1),
-    "",
-    ...(withBreak ? ["<ColumnBreak />", ""] : []),
-    paragraph(2),
-    "",
-    paragraph(3),
-    "",
-    paragraph(4),
+    `<Section columns="${columns}">`,
+    ...Array.from({ length: count }, (_, i) => [bigParagraph(i + 1), ""]).flat(),
     "</Section>",
     "</Book>",
   ].join("\n");
+
+const paragraph = (n: number) => `Paragraph ${n} with a little more text so it takes up real vertical space in its column.`;
+
+// Two short paragraphs -- render-book.ts sets `column-fill: auto` on every section,
+// so as long as both paragraphs together fit under one column's height (which two
+// short paragraphs comfortably do), the *first* column fills before the *second* one
+// gets anything: a normatively specified fill order, not the "balance" heuristic
+// that would otherwise spread even a small amount of content across both columns to
+// even out their height, and could do so differently across machines.
+const columnBreakSource = (withBreak: boolean) =>
+  ['<Book size="A5">', '<Section columns="2">', paragraph(1), "", ...(withBreak ? ["<ColumnBreak />", ""] : []), paragraph(2), "</Section>", "</Book>"].join(
+    "\n",
+  );
+
+const pageBreakSource = [
+  "# A cheat sheet",
+  "",
+  "One short paragraph of prose.",
+  "",
+  "<PageBreak />",
+  "",
+  "Another short paragraph of prose.",
+].join("\n");
 
 /**
  * Issue #3's markup: page size, columns, and forced breaks. Each test paginates OUR
  * book through the real Vivliostyle engine and asserts an observable property of the
  * result -- a page's real rendered size, a rendered element's real on-page x
- * position -- never Vivliostyle's own pagination correctness, and never a comparison
- * against an expected markup string.
+ * position, which page index an element landed on -- never Vivliostyle's own
+ * pagination correctness, and never a comparison against an expected markup string.
  */
 test.describe("book markup", () => {
   test("a book's declared page size sizes the printed page", async ({ page }) => {
@@ -87,28 +101,38 @@ test.describe("book markup", () => {
   test("a two-column section lays its text out in two columns", async ({ page }) => {
     await page.goto("/tests/fixtures/harness.html");
 
-    const { positions } = await page.evaluate((source) => window.__paginateAndInspect(source), twoColumnSource(2));
+    const { positions } = await page.evaluate((source) => window.__paginateAndInspect(source), overflowSource(2, 6));
 
-    const distinctColumnXPositions = new Set(Object.values(positions).map((p) => p.x));
+    const distinctColumnXPositions = new Set(
+      Object.values(positions)
+        .map((p) => p.x)
+        .filter((x) => x !== undefined),
+    );
     expect(distinctColumnXPositions.size).toBe(2);
   });
 
   test("a three-column section lays its text out in three columns", async ({ page }) => {
     await page.goto("/tests/fixtures/harness.html");
 
-    const { positions } = await page.evaluate((source) => window.__paginateAndInspect(source), twoColumnSource(3));
+    const { positions } = await page.evaluate((source) => window.__paginateAndInspect(source), overflowSource(3, 7));
 
-    const distinctColumnXPositions = new Set(Object.values(positions).map((p) => p.x));
+    const distinctColumnXPositions = new Set(
+      Object.values(positions)
+        .map((p) => p.x)
+        .filter((x) => x !== undefined),
+    );
     expect(distinctColumnXPositions.size).toBe(3);
   });
 
   test("a forced page break ends the current page and starts the next", async ({ page }) => {
     await page.goto("/tests/fixtures/harness.html");
 
-    const without = await page.evaluate((source) => window.__paginateBook(source), noPageBreak);
-    const withBreak = await page.evaluate((source) => window.__paginateBook(source), withPageBreak);
+    const { positions } = await page.evaluate((source) => window.__paginateAndInspect(source), pageBreakSource);
 
-    expect(withBreak).toBeGreaterThan(without);
+    // Line 3 is the paragraph immediately before the break, line 7 the one
+    // immediately after it -- proof the break landed exactly between them, not
+    // just that a break happened somewhere in the document.
+    expect(positions["7"]!.pageIndex!).toBeGreaterThan(positions["3"]!.pageIndex!);
   });
 
   test("a forced column break ends the current column and starts the next", async ({ page }) => {
@@ -122,6 +146,6 @@ test.describe("book markup", () => {
     // them -- proof the break moved it, not just that two columns exist.
     const naturalX = without.positions["5"]!.x;
     const forcedX = withBreak.positions["7"]!.x;
-    expect(forcedX).toBeGreaterThan(naturalX);
+    expect(forcedX!).toBeGreaterThan(naturalX!);
   });
 });

@@ -1,7 +1,6 @@
-import { marked, type Token } from "marked";
-
 import { Book } from "./book";
 import { parseBook, Section, SectionContent } from "./parse-book";
+import { renderProse } from "./prose-renderer";
 
 /**
  * Turns a book's source into a standalone HTML document that a pagination engine can
@@ -36,7 +35,11 @@ ${sectionsHtml}
 
 function renderSection(section: Section): string {
   const contentHtml = section.content.map(renderSectionContent).join("\n");
-  return `<section data-line="${section.line}" style="column-count: ${section.columns};">
+  // column-fill: auto (rather than the initial "balance") fills a column fully
+  // before spilling into the next, so where content lands follows the column order
+  // an author reads and writes in, not a height-balancing heuristic that could
+  // reshuffle it between columns as unrelated content earlier in the book changes.
+  return `<section data-line="${section.line}" style="column-count: ${section.columns}; column-fill: auto;">
 ${contentHtml}
 </section>`;
 }
@@ -49,40 +52,4 @@ function renderSectionContent(item: SectionContent): string {
     return `<div class="column-break" data-line="${item.line}" style="break-before: column;"></div>`;
   }
   return renderProse(item.source, item.line);
-}
-
-/**
- * Renders one prose run block by block through marked's own tokenizer, rather than
- * `marked.parse` in a single call, so each block-level element (paragraph, heading,
- * list, ...) can carry the source line it started on -- what a later ticket needs to
- * scroll the preview to the editor's cursor without regenerating this markup.
- *
- * Reference-style link definitions elsewhere in the same run will not resolve across
- * block boundaries this way; this book's prose has not needed them, and the fix
- * (parsing the whole run once, then re-slicing the rendered HTML by token) is more
- * machinery than that's worth today.
- */
-function renderProse(source: string, startLine: number): string {
-  const tokens = marked.lexer(source);
-  const parts: string[] = [];
-  let line = startLine;
-
-  for (const token of tokens) {
-    const html = marked.parser([token]).trim();
-    if (html !== "") parts.push(withDataLine(html, line));
-    line += countNewlines((token as Token).raw);
-  }
-
-  return parts.join("\n");
-}
-
-function countNewlines(text: string): number {
-  let count = 0;
-  for (const ch of text) if (ch === "\n") count++;
-  return count;
-}
-
-/** Tags a rendered block's outermost element with the source line it came from. */
-function withDataLine(html: string, line: number): string {
-  return html.replace(/^<([a-zA-Z][a-zA-Z0-9-]*)/, `<$1 data-line="${line}"`);
 }

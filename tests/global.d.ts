@@ -6,7 +6,7 @@ declare global {
   interface PageInspection {
     pageCount: number;
     pageSizes: ReadonlyArray<{ width: number; height: number }>;
-    positions: Record<string, { x: number; y: number }>;
+    positions: Record<string, { x?: number; y?: number; pageIndex: number | null }>;
   }
 
   interface Window {
