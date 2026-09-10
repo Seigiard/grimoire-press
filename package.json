@@ -3,6 +3,13 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.core.json --noEmit",
+    "lint": "eslint .",
+    "test": "playwright test"
+  },
   "dependencies": {
     "@codemirror/commands": "^6.11.0",
     "@codemirror/lang-markdown": "^6.5.2",
@@ -16,6 +23,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
+    "@types/node": "^22.20.2",
     "eslint": "^10.10.0",
     "eslint-plugin-boundaries": "^7.2.0",
     "typescript": "^6.0.3",
