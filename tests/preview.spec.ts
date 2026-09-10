@@ -33,6 +33,20 @@ const UNKNOWN_TAG_SOURCE = [
   "</Book>",
 ].join("\n");
 
+// Line 4 is the <PageBreak /> the author wrote inside the page. Chosen over the
+// column-break and the unclosed-page variants of the same mistake because it is the
+// one whose reason ("a page is already one page") an author could only be given by
+// the parser having a page-specific answer -- an unclosed page is worded by the same
+// statement an unclosed section already is, so it would prove less about pages here.
+const BREAK_INSIDE_PAGE_SOURCE = [
+  '<Book size="A5">',
+  "<Page>",
+  "A card that stands on its own.",
+  "<PageBreak />",
+  "</Page>",
+  "</Book>",
+].join("\n");
+
 async function replaceSource(page: import("@playwright/test").Page, source: string): Promise<void> {
   await page.locator(".cm-editor").click();
   await page.keyboard.press("ControlOrMeta+A");
@@ -67,6 +81,25 @@ test.describe("preview refresh and error surface", () => {
     await expect.poll(() => page.locator("#status").textContent()).toContain("line 3");
 
     // #then: the preview still shows exactly what it showed before the break
+    expect(await page.locator("#preview").textContent()).toBe(goodPreview);
+  });
+
+  test("a break inside a page is reported with its reason, and the last good preview stays put", async ({ page }) => {
+    // #given: a book that parses and paginates
+    await replaceSource(page, GOOD_SOURCE);
+    await expect.poll(() => page.locator("#preview").textContent()).toContain("A good paragraph appears here.");
+    const goodPreview = await page.locator("#preview").textContent();
+
+    // #when: the author writes a page break inside a page
+    await replaceSource(page, BREAK_INSIDE_PAGE_SOURCE);
+
+    // #then: the status names the line and says why a page has nothing to break --
+    // an author who read only "unexpected tag" would go looking for a typo
+    await expect(page.locator("#status")).toBeVisible();
+    await expect.poll(() => page.locator("#status").textContent()).toContain("line 4");
+    expect(await page.locator("#status").textContent()).toContain("a page is already one page");
+
+    // #then: and the book they were writing against is still on screen
     expect(await page.locator("#preview").textContent()).toBe(goodPreview);
   });
 
