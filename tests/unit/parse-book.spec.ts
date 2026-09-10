@@ -186,4 +186,42 @@ describe("parseBook unknown-tag detection", () => {
     const source = ['<Book foo="bar">', '<Section columns="1">', "Some prose.", "</Section>", "</Book>"].join("\n");
     expect(() => parseBook(source)).not.toThrow(UnknownTagError);
   });
+
+  it("names a tag-shaped typo strictly before <Book>", () => {
+    const source = [
+      "<PageBrek />",
+      '<Book size="A5">',
+      '<Section columns="1">',
+      "Some prose.",
+      "</Section>",
+      "</Book>",
+    ].join("\n");
+    try {
+      parseBook(source);
+      expect.unreachable("parseBook was expected to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnknownTagError);
+      expect((error as UnknownTagError).tag).toBe("PageBrek");
+      expect((error as UnknownTagError).line).toBe(1);
+    }
+  });
+
+  it("names a tag-shaped typo strictly after </Book>", () => {
+    const source = [
+      '<Book size="A5">',
+      '<Section columns="1">',
+      "Some prose.",
+      "</Section>",
+      "</Book>",
+      "<PageBrek />",
+    ].join("\n");
+    try {
+      parseBook(source);
+      expect.unreachable("parseBook was expected to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnknownTagError);
+      expect((error as UnknownTagError).tag).toBe("PageBrek");
+      expect((error as UnknownTagError).line).toBe(6);
+    }
+  });
 });

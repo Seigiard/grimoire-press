@@ -24,6 +24,20 @@
         return first === second;
       };
 
+      // Issue #6 review finding: the module-level `inFlight` guard that makes the
+      // above possible must also be cleared once an attempt settles, or every
+      // print after the very first one in a session would keep returning that
+      // first (already-settled) promise -- no fresh dialog would ever open again.
+      // Awaiting the first call in full, then making a second, is what proves the
+      // guard was actually released rather than merely set once.
+      window.__printSequentiallyStartsFreshAttempts = async (source) => {
+        const html = renderBook({ source });
+        const first = printBook(html);
+        await first;
+        const second = printBook(html);
+        return first !== second;
+      };
+
       // Exposes the exact core+adapter seam issue #2 asks the test to exercise:
       // a book's source in, a real-engine page count out. Nothing here asserts
       // anything about markup shape or about Vivliostyle's own correctness.

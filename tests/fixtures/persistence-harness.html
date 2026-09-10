@@ -43,12 +43,7 @@
       const statusContainer = document.getElementById("status");
 
       const editor = startApp(
-        editorContainer,
-        previewContainer,
-        printControl,
-        refreshControl,
-        autoRefreshControl,
-        statusContainer,
+        { editorContainer, previewContainer, printControl, refreshControl, autoRefreshControl, statusContainer },
         createEditor,
         paginate,
         printBook,

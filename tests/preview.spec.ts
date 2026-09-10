@@ -97,6 +97,38 @@ test.describe("preview refresh and error surface", () => {
     await expect.poll(() => page.locator("#preview").textContent()).toContain("A good paragraph appears here.");
   });
 
+  test("unchecking auto-refresh mid-debounce cancels the pending repaint too", async ({ page }) => {
+    // #given: the author types with auto-refresh still on, so a repaint is
+    // debounced and waiting
+    await expect.poll(() => page.locator("#preview").textContent()).toContain("Start writing your book here.");
+    await replaceSource(page, GOOD_SOURCE);
+
+    // #when: auto-refresh is switched off before the debounce has elapsed
+    await page.locator("#auto-refresh").uncheck();
+
+    // #then: waiting well past the debounce window, the pending repaint never
+    // fires -- switching off a moment before the timer would have landed does
+    // not still let it through
+    await page.waitForTimeout(600);
+    expect(await page.locator("#preview").textContent()).not.toContain("A good paragraph appears here.");
+  });
+
+  test("re-enabling auto-refresh repaints immediately, without waiting for another keystroke", async ({ page }) => {
+    // #given: auto-refresh is off and the author has written something new that
+    // has not reached the preview yet
+    await expect.poll(() => page.locator("#preview").textContent()).toContain("Start writing your book here.");
+    await page.locator("#auto-refresh").uncheck();
+    await replaceSource(page, GOOD_SOURCE);
+    await page.waitForTimeout(600);
+    expect(await page.locator("#preview").textContent()).not.toContain("A good paragraph appears here.");
+
+    // #when: the author re-enables auto-refresh, without typing anything else
+    await page.locator("#auto-refresh").check();
+
+    // #then: the preview catches up on its own
+    await expect.poll(() => page.locator("#preview").textContent()).toContain("A good paragraph appears here.");
+  });
+
   test("a burst of typing costs far fewer repaints than it has keystrokes", async ({ page }) => {
     // #given: a counter on the native DOM method pagination.ts calls once per
     // attempted repaint, counted independently of anything our own code tracks.
@@ -183,5 +215,65 @@ test.describe("printing", () => {
     const shared = await page.evaluate((source) => window.__printTwiceSharesOneAttempt(source), GOOD_SOURCE);
 
     expect(shared).toBe(true);
+  });
+
+  test("a print request made after the previous one has settled starts its own fresh attempt", async ({ page }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    const fresh = await page.evaluate((source) => window.__printSequentiallyStartsFreshAttempts(source), GOOD_SOURCE);
+
+    expect(fresh).toBe(true);
+  });
+});
+
+/**
+ * The print button had no error handling at all before this ticket: a `renderBook`
+ * throw was an uncaught exception, and the print adapter's rejection had no
+ * `.catch`. Both consumer is the author who clicks print while something is
+ * wrong; the observable failure is nothing reaching `#status` (or the page
+ * breaking outright) instead of a message with printing's own wording. Forcing
+ * a genuine Vivliostyle print-engine failure has no oracle independent of the
+ * engine itself -- the print adapter is substituted with one that always
+ * rejects, at the same seam issue #1's architecture designed for this -- while
+ * the broken-markup case below exercises the real, unmodified `renderBook`.
+ */
+test.describe("print button error paths", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/tests/fixtures/print-error-harness.html");
+  });
+
+  test("a failing print engine is reported with printing's own wording", async ({ page }) => {
+    await expect.poll(() => page.locator("#preview").textContent()).toContain("Start writing your book here.");
+
+    await page.locator("#print").click();
+
+    await expect(page.locator("#status")).toBeVisible();
+    await expect.poll(() => page.locator("#status").textContent()).toContain("Printing failed");
+  });
+
+  test("printing broken markup is reported rather than thrown uncaught", async ({ page }) => {
+    await replaceSource(page, BROKEN_SOURCE);
+
+    await page.locator("#print").click();
+
+    await expect(page.locator("#status")).toBeVisible();
+    await expect.poll(() => page.locator("#status").textContent()).toContain("Printing failed");
+    expect(await page.locator("#status").textContent()).toContain("line 3");
+  });
+
+  test("a standing print error survives a repaint that succeeds", async ({ page }) => {
+    // #given: a print failure the author has not acknowledged
+    await expect.poll(() => page.locator("#preview").textContent()).toContain("Start writing your book here.");
+    await page.locator("#print").click();
+    await expect.poll(() => page.locator("#status").textContent()).toContain("Printing failed");
+
+    // #when: the author keeps writing and a repaint succeeds (this harness's
+    // fake pagination adapter always resolves)
+    await replaceSource(page, GOOD_SOURCE);
+    await expect.poll(() => page.locator("#preview").textContent()).toContain("A good paragraph appears here.");
+
+    // #then: the print error is still there -- a repaint's own success clears
+    // only preview status, never print status
+    expect(await page.locator("#status").textContent()).toContain("Printing failed");
   });
 });

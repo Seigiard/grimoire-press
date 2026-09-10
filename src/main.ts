@@ -25,12 +25,7 @@ if (
 }
 
 startApp(
-  editorContainer,
-  previewContainer,
-  printControl,
-  refreshControl,
-  autoRefreshControl,
-  statusContainer,
+  { editorContainer, previewContainer, printControl, refreshControl, autoRefreshControl, statusContainer },
   createEditor,
   paginate,
   printBook,

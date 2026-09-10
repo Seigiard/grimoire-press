@@ -48,3 +48,30 @@ export function describePreviewError(error: PreviewError): string {
     }
   }
 }
+
+/**
+ * What the author reads when printing itself fails, sharing the same closed
+ * union -- a broken book is the same broken book whether the preview or the
+ * print button noticed it -- but its own wording, never the repaint's.
+ * `toPreviewError` is reused as the print handler's classifier too: the same
+ * three-way split (core's two thrown errors, or "something else") applies to
+ * printing's own failure just as much as a repaint's. A `pagination-failure`
+ * case here did not actually come from the pagination engine, though --
+ * printing.ts's own rejection message already names printing, not pagination,
+ * so it is used as-is rather than wrapped in `describePreviewError`'s
+ * pagination-specific text.
+ */
+export function describePrintError(error: PreviewError): string {
+  switch (error.kind) {
+    case "markup-error":
+      return `line ${error.line}: ${error.message}`;
+    case "unknown-tag":
+      return `line ${error.line}: <${error.tag}> is not a tag this editor recognizes`;
+    case "pagination-failure":
+      return error.message;
+    default: {
+      const exhaustive: never = error;
+      throw new Error(`unhandled preview error kind: ${JSON.stringify(exhaustive)}`);
+    }
+  }
+}

@@ -2,7 +2,7 @@ import { renderBook } from "../core/render-book";
 import type { createEditor, EditorHandle } from "../adapters/editor";
 import type { paginate } from "../adapters/pagination";
 import type { printBook } from "../adapters/printing";
-import { describePreviewError, toPreviewError, type PreviewError } from "./preview-error";
+import { describePreviewError, describePrintError, toPreviewError, type PreviewError } from "./preview-error";
 
 const INITIAL_SOURCE = "# Untitled book\n\nStart writing your book here.\n";
 
@@ -12,16 +12,34 @@ const INITIAL_SOURCE = "# Untitled book\n\nStart writing your book here.\n";
 const REFRESH_DEBOUNCE_MS = 400;
 
 /**
+ * The DOM elements the app is wired to. Bundled as one named record rather than
+ * six positional parameters: five of them share the same `HTMLElement` type, so
+ * transposing two at a call site would compile cleanly and only fail at runtime.
+ * This is a plain record of references, not a dependency container that resolves
+ * anything -- ADR-0004 forbids the latter, not the former; the three adapter
+ * functions below stay separate arguments.
+ */
+export interface AppElements {
+  readonly editorContainer: HTMLElement;
+  readonly previewContainer: HTMLElement;
+  readonly printControl: HTMLElement;
+  readonly refreshControl: HTMLElement;
+  readonly autoRefreshControl: HTMLInputElement;
+  readonly statusContainer: HTMLElement;
+}
+
+/**
  * Wires the editor, pagination, and printing adapters to core's pure rendering. Each
  * adapter arrives as its own parameter, not a bundled options object or a container:
- * four seams, four arguments (ADR-0004).
+ * three seams, three arguments (ADR-0004).
  *
  * Persistence is delegated to an adapter function that reads and writes the draft
  * to browser storage. The adapter is responsible for debouncing writes.
  *
- * Nothing outside the editor's own buffer is stored. The preview markup is derived
- * whenever it is needed, to repaint and to print alike, which is the state model
- * ADR-0004 records.
+ * The preview markup is derived whenever it is needed, to repaint and to print
+ * alike, rather than stored -- ADR-0004's derived-state model, amended to record
+ * the scheduling state this ticket adds (see the ADR itself for why the
+ * conclusion still holds).
  *
  * The preview's own refresh is a second, independent debounce (issue #6): typing
  * always updates the persisted draft on its own schedule, but only schedules a
@@ -34,29 +52,39 @@ const REFRESH_DEBOUNCE_MS = 400;
  * newer one).
  */
 export function startApp(
-  editorContainer: HTMLElement,
-  previewContainer: HTMLElement,
-  printControl: HTMLElement,
-  refreshControl: HTMLElement,
-  autoRefreshControl: HTMLInputElement,
-  statusContainer: HTMLElement,
+  elements: AppElements,
   createEditorAdapter: typeof createEditor,
   paginateAdapter: typeof paginate,
   printBookAdapter: typeof printBook,
   persistRead: () => string | undefined,
   persistWrite: (source: string) => void,
 ): EditorHandle {
-  const setStatus = (error: PreviewError | undefined): void => {
-    if (error === undefined) {
-      statusContainer.textContent = "";
-      statusContainer.hidden = true;
-      return;
-    }
-    // The preview on screen is whatever the last successful repaint left there --
-    // never blanked by this call -- so the message must say it is stale, not that
-    // it is wrong.
-    statusContainer.textContent = `Preview is out of date — ${describePreviewError(error)}`;
-    statusContainer.hidden = false;
+  const { editorContainer, previewContainer, printControl, refreshControl, autoRefreshControl, statusContainer } = elements;
+
+  // The preview's staleness and a print failure are two independent things an
+  // author can be told about at once (issue #6's third handed-over defect: a
+  // shared status sink let a repaint that succeeded silently erase a print
+  // error nobody had acknowledged yet). Each is tracked and rendered on its own,
+  // so clearing one never touches the other.
+  let previewError: PreviewError | undefined;
+  let printError: PreviewError | undefined;
+
+  const renderStatus = (): void => {
+    const parts: string[] = [];
+    if (previewError !== undefined) parts.push(`Preview is out of date — ${describePreviewError(previewError)}`);
+    if (printError !== undefined) parts.push(`Printing failed — ${describePrintError(printError)}`);
+    statusContainer.textContent = parts.join(" ");
+    statusContainer.hidden = parts.length === 0;
+  };
+
+  const setPreviewStatus = (error: PreviewError | undefined): void => {
+    previewError = error;
+    renderStatus();
+  };
+
+  const setPrintStatus = (error: PreviewError | undefined): void => {
+    printError = error;
+    renderStatus();
   };
 
   let running = false;
@@ -79,13 +107,13 @@ export function startApp(
     } catch (error) {
       // Thrown before the pagination adapter is ever called, so the container --
       // and whatever it last showed -- is never touched.
-      setStatus(toPreviewError(error));
+      setPreviewStatus(toPreviewError(error));
       afterRun();
       return;
     }
     void paginateAdapter(previewContainer, html)
-      .then(() => setStatus(undefined))
-      .catch((error: unknown) => setStatus(toPreviewError(error)))
+      .then(() => setPreviewStatus(undefined))
+      .catch((error: unknown) => setPreviewStatus(toPreviewError(error)))
       .finally(afterRun);
   }
 
@@ -98,8 +126,14 @@ export function startApp(
   };
 
   let debounceId: ReturnType<typeof setTimeout> | undefined;
+  const clearScheduledRepaint = (): void => {
+    if (debounceId !== undefined) {
+      clearTimeout(debounceId);
+      debounceId = undefined;
+    }
+  };
   const scheduleRepaint = (source: string): void => {
-    if (debounceId !== undefined) clearTimeout(debounceId);
+    clearScheduledRepaint();
     debounceId = setTimeout(() => {
       debounceId = undefined;
       requestRepaint(source);
@@ -107,10 +141,12 @@ export function startApp(
   };
 
   const initialSource = persistRead() ?? INITIAL_SOURCE;
-  let latestSource = initialSource;
 
+  // No separate copy of the source is kept: CodeMirror's own buffer is the one
+  // copy, read back through `editor.getSource()` wherever the latest text is
+  // needed (ADR-0004 -- nothing derivable from the editor's own state is stored
+  // a second time).
   const onChange = (source: string): void => {
-    latestSource = source;
     persistWrite(source);
     if (autoRefreshControl.checked) {
       scheduleRepaint(source);
@@ -122,16 +158,18 @@ export function startApp(
   refreshControl.addEventListener("click", () => {
     // A manual refresh acts on the latest source immediately -- a pending
     // automatic one would otherwise still fire moments later on the same source.
-    if (debounceId !== undefined) {
-      clearTimeout(debounceId);
-      debounceId = undefined;
-    }
-    requestRepaint(latestSource);
+    clearScheduledRepaint();
+    requestRepaint(editor.getSource());
   });
 
   autoRefreshControl.addEventListener("change", () => {
     if (autoRefreshControl.checked) {
-      requestRepaint(latestSource);
+      requestRepaint(editor.getSource());
+    } else {
+      // Otherwise a debounce armed the moment before the author switched
+      // automatic refreshing off would still fire afterwards, repainting once
+      // more despite being told not to.
+      clearScheduledRepaint();
     }
   });
 
@@ -140,12 +178,12 @@ export function startApp(
     try {
       html = renderBook({ source: editor.getSource() });
     } catch (error) {
-      setStatus(toPreviewError(error));
+      setPrintStatus(toPreviewError(error));
       return;
     }
-    printBookAdapter(html).catch((error: unknown) => {
-      setStatus(toPreviewError(error));
-    });
+    printBookAdapter(html)
+      .then(() => setPrintStatus(undefined))
+      .catch((error: unknown) => setPrintStatus(toPreviewError(error)));
   });
 
   requestRepaint(initialSource);
