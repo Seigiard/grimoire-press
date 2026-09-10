@@ -89,6 +89,58 @@
         return { pageCount, pageSizes, positions };
       };
 
+      // Issue #5's seam: a book's source in, each real page's running-header
+      // text and page-number text out, read from the actual margin-box
+      // elements Vivliostyle renders per page (`data-vivliostyle-page-margin-box`,
+      // an internal attribute, not public API, but the only way to read what a
+      // margin box actually resolved to without reimplementing Vivliostyle's own
+      // string-set/counter resolution). Unlike the `[data-line]` content nodes
+      // `__paginateAndInspect` reads, Vivliostyle gives each page exactly one
+      // `[data-vivliostyle-page-index]` ancestor, so no de-duplication is needed
+      // here.
+      window.__paginateAndInspectHeaders = async (source) => {
+        const html = renderBook({ source });
+        const container = document.getElementById("preview");
+        await paginate(container, html);
+
+        const pages = [];
+        for (const pageEl of container.querySelectorAll("[data-vivliostyle-page-index]")) {
+          const pageIndex = Number(pageEl.getAttribute("data-vivliostyle-page-index"));
+          const header = pageEl.querySelector('[data-vivliostyle-page-margin-box="top-center"]');
+          const pageNumber = pageEl.querySelector('[data-vivliostyle-page-margin-box="bottom-center"]');
+          pages.push({
+            pageIndex,
+            header: header ? header.textContent.trim() : undefined,
+            pageNumber: pageNumber ? pageNumber.textContent.trim() : undefined,
+          });
+        }
+        pages.sort((a, b) => a.pageIndex - b.pageIndex);
+        return pages;
+      };
+
+      // Issue #5's own theme claim: the running header and page number are
+      // theme-owned typography (see default-ru/theme.ts's MARGIN_BOX_CSS), the
+      // same claim issue #4's __inspectFonts below already proves for headings
+      // and body text. That helper reads a plain srcdoc iframe because font
+      // cascade for ordinary elements needs no real layout; a margin box only
+      // exists once Vivliostyle has actually paginated the document (it is not
+      // present in render-book.ts's own markup), so this reads computed style
+      // directly off the real per-page margin-box elements the pagination
+      // container above produces, in the same document -- no iframe needed,
+      // since the container already lives in this page.
+      window.__inspectMarginBoxFonts = async (source) => {
+        const html = renderBook({ source });
+        const container = document.getElementById("preview");
+        await paginate(container, html);
+
+        const topCenter = container.querySelector('[data-vivliostyle-page-margin-box="top-center"]');
+        const bottomCenter = container.querySelector('[data-vivliostyle-page-margin-box="bottom-center"]');
+        return {
+          topCenter: topCenter ? getComputedStyle(topCenter).fontFamily : undefined,
+          bottomCenter: bottomCenter ? getComputedStyle(bottomCenter).fontFamily : undefined,
+        };
+      };
+
       // Issue #4's seam: a book's source in, real computed `font-family` values
       // out, keyed by CSS selector. Loaded into an iframe (not the pagination
       // container above) because font resolution and cascade order are a plain
