@@ -45,9 +45,39 @@ function expectMarkupError(source: string, line: number, message: RegExp): void 
 }
 
 describe("parseBook error paths", () => {
+  it("names the line of a size the renderer could not turn a page against", () => {
+    // #given: books bound at sizes CSS would take but a turned page cannot be
+    // composed from -- the whole point of refusing them here (line 1 each)
+    for (const size of ["auto", "A4 100mm", "1e2mm 2e2mm", "90mm 160mm 40mm"]) {
+      const source = [`<Book size="${size}">`, "<Page>", "A card.", "</Page>", "</Book>"].join("\n");
+
+      // #when: the book is parsed
+      // #then: the author is told on the line they wrote it, rather than the page
+      // silently staying upright because the engine discarded a size it could not
+      // read
+      expectMarkupError(source, 1, /has an invalid size attribute/);
+    }
+  });
+
+  it("takes the sizes a page can be turned against", () => {
+    // #given: the two shapes the renderer composes from
+    // #when: each is parsed
+    // #then: it is accepted, so tightening the vocabulary above did not take away a
+    // way an author was already binding a book
+    for (const size of ["A5", "A4 landscape", "100mm", "90mm 160mm"]) {
+      const source = [`<Book size="${size}">`, "<Page>", "A card.", "</Page>", "</Book>"].join("\n");
+      expect(parseBook(source).size).toBe(size);
+    }
+  });
+
   it("names the line of an invalid size attribute", () => {
     const source = ['<Book size="A5;bad">', '<Section columns="1">', "Some prose.", "</Section>", "</Book>"].join("\n");
     expectMarkupErrorLine(source, 1);
+  });
+
+  it("names the line of an invalid orientation attribute", () => {
+    const source = ['<Book size="A5">', '<Page orientation="sideways">', "A card.", "</Page>", "</Book>"].join("\n");
+    expectMarkupErrorLine(source, 2);
   });
 
   it("names the line of an invalid columns attribute", () => {
@@ -429,5 +459,41 @@ describe("parseBook page vocabulary", () => {
         { kind: "prose", line: 7 },
       ],
     });
+  });
+});
+
+/**
+ * Issue #22's vocabulary: a page may declare which way its sheet lies. The consumer
+ * is render-book.ts, which composes the page's sheet from the book's own size and
+ * this word, and through it an author with a table too wide for the page. The
+ * observable failure is a declared orientation not reaching the parsed book at all,
+ * or a page that declared none arriving with one it never asked for -- which would
+ * give a plain page a sheet of its own to declare where it has nothing to say. The
+ * oracle is the fixture itself: the word this test wrote into the source.
+ */
+describe("parseBook page orientation", () => {
+  const orientationOf = (pageTag: string): string | undefined => {
+    const source = ['<Book size="A5">', pageTag, "A card.", "</Page>", "</Book>"].join("\n");
+    const [block] = parseBook(source).blocks;
+    if (block?.kind !== "page") throw new Error("the book's only block was not a page");
+    return block.orientation;
+  };
+
+  it("reads the orientation a page declares", () => {
+    // #given: a page turned each of the two ways the vocabulary knows
+    // #when: the book is parsed
+    // #then: the page carries the word the author wrote
+    expect({
+      landscape: orientationOf('<Page orientation="landscape">'),
+      portrait: orientationOf('<Page orientation="portrait">'),
+    }).toEqual({ landscape: "landscape", portrait: "portrait" });
+  });
+
+  it("leaves a page that declares no orientation without one", () => {
+    // #given: a page written exactly as it was before an orientation could be
+    // declared
+    // #when: the book is parsed
+    // #then: it declares nothing, rather than being given a default it never wrote
+    expect(orientationOf("<Page>")).toBeUndefined();
   });
 });

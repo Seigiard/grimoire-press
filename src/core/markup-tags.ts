@@ -22,11 +22,13 @@ const SECTION_OPEN = /^<Section(?:\s+columns="([^"]*)")?\s*>$/;
 const SECTION_CLOSE = /^<\/Section>$/;
 // `<Page>`'s attribute run is captured the way `<Book>`'s is, rather than refused
 // outright. A page declares no column count -- it exists to escape the flow a
-// column count describes -- but recognising `<Page columns="2">` as a page is what
-// lets `parse-book.ts` tell its author that, instead of the line failing to match
-// any tag and being reported as prose outside every block. Still rejects
-// `<PageBreak />` by construction: an attribute run must start with whitespace, and
-// `Break` follows the name with none, so nothing can absorb it.
+// column count describes -- and no size, because a book is bound at one format, so
+// a page turns the book's own sheet rather than choosing a different one. It does
+// take an orientation. Recognising `<Page columns="2">` as a page is what lets
+// `parse-book.ts` tell its author about the column count, instead of the line
+// failing to match any tag and being reported as prose outside every block. Still
+// rejects `<PageBreak />` by construction: an attribute run must start with
+// whitespace, and `Break` follows the name with none, so nothing can absorb it.
 const PAGE_OPEN = /^<Page((?:\s+[A-Za-z]+="[^"]*")*)\s*>$/;
 const PAGE_CLOSE = /^<\/Page>$/;
 const PAGE_BREAK = /^<PageBreak\s*\/>$/;
@@ -45,9 +47,8 @@ export type TagLine =
   | { readonly kind: "section-open"; readonly columns: string | undefined }
   | { readonly kind: "section-close" }
   /** `columns` is carried even though a page has none, so the parser can reject it
-   * by name. A page attribute a page really does take -- `orientation`, issue #22
-   * -- is read from the same attribute run and belongs beside this, not instead of
-   * it: a page takes no column count, which is narrower than taking no attributes.
+   * by name; `orientation` is one a page really does take (issue #22). Both are
+   * read out of the same captured attribute run.
    *
    * `attributeNames` is every name the run carried, in the order it carried them,
    * so the parser can refuse one it has no meaning for instead of ignoring it. A
@@ -55,7 +56,12 @@ export type TagLine =
    * on a page than elsewhere, because a page exists to be arranged deliberately
    * and a misspelled `colums` would leave the author reading a sheet that looks
    * right for a reason they never asked for. */
-  | { readonly kind: "page-open"; readonly columns: string | undefined; readonly attributeNames: readonly string[] }
+  | {
+      readonly kind: "page-open";
+      readonly columns: string | undefined;
+      readonly orientation: string | undefined;
+      readonly attributeNames: readonly string[];
+    }
   | { readonly kind: "page-close" }
   | { readonly kind: "page-break" }
   | { readonly kind: "column-break" };
@@ -117,6 +123,7 @@ export function matchTagLine(line: string): TagLine | undefined {
     return {
       kind: "page-open",
       columns: attributeValue(pageOpen[1] ?? "", "columns"),
+      orientation: attributeValue(pageOpen[1] ?? "", "orientation"),
       attributeNames: attributeNames(pageOpen[1] ?? ""),
     };
   if (PAGE_CLOSE.test(trimmed)) return { kind: "page-close" };

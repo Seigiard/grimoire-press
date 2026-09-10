@@ -38,6 +38,11 @@ export interface Section {
   readonly content: readonly SectionContent[];
 }
 
+/** The two ways a sheet can be turned. A page declares one of these or nothing at
+ * all; it never declares a size, because a book is bound at one format and a page
+ * that chose its own would be a book nobody can bind. */
+export type PageOrientation = "portrait" | "landscape";
+
 /**
  * Exactly one physical page the author composes rather than the engine fills
  * (CONTEXT.md's Page): a character sheet, a reference card, a table meant to sit
@@ -51,6 +56,10 @@ export interface Section {
 export interface Page {
   readonly kind: "page";
   readonly line: number;
+  /** `undefined` when the author declared none, which is not the same as declaring
+   * "portrait": a page that declares nothing has nothing of its own to say, so
+   * `render-book.ts` emits no `@page` rule for it at all (ADR-0007). */
+  readonly orientation: PageOrientation | undefined;
   readonly content: readonly SectionContent[];
 }
 
@@ -76,7 +85,26 @@ export interface ParsedBook {
   readonly blocks: readonly BookBlock[];
 }
 
-const VALID_SIZE = /^[A-Za-z0-9.\s]+$/;
+/**
+ * The sizes a book may be bound at, which is narrower than what CSS's own `@page
+ * size` accepts. Two shapes only: a named page size with an optional orientation
+ * word (`A5`, `A4 landscape`), or one or two absolute lengths (`100mm`, `90mm
+ * 160mm`).
+ *
+ * Narrow because `render-book.ts` composes a turned page's sheet out of this
+ * (issue #22), and it can only turn a size it can read. Anything else -- `auto`,
+ * three tokens, a name followed by a length, an exponent -- used to be accepted
+ * here and then quietly produced a `size` the engine discards, so the page stayed
+ * upright and nothing told the author why. Refusing it names the line instead.
+ *
+ * `auto` is refused with the rest: a book is bound at one format, and `auto` names
+ * no format for a page to be turned against.
+ */
+const LENGTH = String.raw`\d*\.?\d+(?:mm|cm|in|q|pt|pc|px)`;
+const VALID_SIZE = new RegExp(
+  String.raw`^(?:(?!auto\b)[A-Za-z][A-Za-z0-9-]*(?:\s+(?:portrait|landscape))?|${LENGTH}(?:\s+${LENGTH})?)$`,
+  "i",
+);
 
 /** The source, split into lines, plus which of those lines are fenced code and so
  * can never carry a tag -- threaded through every scanning function below instead
@@ -228,6 +256,7 @@ function parseTopLevel(doc: Doc, from: number, to: number): BookBlock[] {
       blocks.push({
         kind: "page",
         line: i + 1,
+        orientation: resolveOrientation(tag.orientation, i),
         content: parseBlockContent(doc, i + 1, closeIndex, "Page"),
       });
       i = closeIndex + 1;
@@ -261,6 +290,7 @@ function assertNoColumnCount(columns: string | undefined, tagLine: number): void
 /**
  * The attributes a page can be given. `columns` is here because it must be
  * recognised in order to be refused by name just above; a page really has none.
+ * `orientation` is one a page does take (issue #22).
  *
  * An attribute a page has no meaning for is refused rather than ignored. Elsewhere
  * an unread attribute is harmless, but a page is the one block an author arranges
@@ -268,13 +298,33 @@ function assertNoColumnCount(columns: string | undefined, tagLine: number): void
  * nothing would leave them reading a sheet that came out wrong for a reason the
  * editor never mentioned.
  */
-const PAGE_ATTRIBUTES: ReadonlySet<string> = new Set(["columns"]);
+const PAGE_ATTRIBUTES: ReadonlySet<string> = new Set(["columns", "orientation"]);
 
 function assertNoUnknownAttribute(names: readonly string[], tagLine: number): void {
   for (const name of names) {
     if (PAGE_ATTRIBUTES.has(name)) continue;
     throw new MarkupError(`<Page ${name}="..."> on line ${tagLine + 1} declares an attribute a page does not have`, tagLine + 1);
   }
+}
+
+function isOrientation(value: string): value is PageOrientation {
+  return value === "portrait" || value === "landscape";
+}
+
+/** `undefined` when the page declares no orientation at all -- the page then takes
+ * the book's own sheet, exactly as it did before an orientation could be declared.
+ * A word this vocabulary does not know is an author's mistake, reported the way an
+ * invalid `<Book size>` already is rather than quietly ignored, which would leave a
+ * misspelled `landscpae` looking like a page that simply refused to turn. */
+function resolveOrientation(orientation: string | undefined, tagLine: number): PageOrientation | undefined {
+  if (orientation === undefined) return undefined;
+  if (!isOrientation(orientation)) {
+    throw new MarkupError(
+      `<Page orientation="${orientation}"> on line ${tagLine + 1} has an invalid orientation attribute`,
+      tagLine + 1,
+    );
+  }
+  return orientation;
 }
 
 function resolveColumns(columns: string | undefined, tagLine: number): number {

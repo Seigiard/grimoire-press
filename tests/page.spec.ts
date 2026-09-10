@@ -52,19 +52,22 @@ const box = (measurement: PageMeasurement, key: string): PageBox => {
 // 2 <Section ...>     6 A card ...          9 Short prose after.
 // 3 Short prose ...   7 </Page>            10 </Section>
 // 4 </Section>                             11 </Book>
-const PROSE_PAGE_PROSE = [
-  '<Book size="A5">',
-  '<Section columns="1">',
-  "Short prose before the card.",
-  "</Section>",
-  "<Page>",
-  "A card that stands on its own.",
-  "</Page>",
-  '<Section columns="1">',
-  "Short prose after the card.",
-  "</Section>",
-  "</Book>",
-].join("\n");
+const proseAroundACard = (size: string, pageTag: string): string =>
+  [
+    `<Book size="${size}">`,
+    '<Section columns="1">',
+    "Short prose before the card.",
+    "</Section>",
+    pageTag,
+    "A card that stands on its own.",
+    "</Page>",
+    '<Section columns="1">',
+    "Short prose after the card.",
+    "</Section>",
+    "</Book>",
+  ].join("\n");
+
+const PROSE_PAGE_PROSE = proseAroundACard("A5", "<Page>");
 
 // 1 <Book>            5 <Page>            8 <Page>           11 <Section ...>
 // 2 <Section ...>     6 First card.       9 Second card.     12 Prose after.
@@ -255,5 +258,125 @@ test.describe("a page keeps its address in the book", () => {
     // #then: the page is numbered like any other page, and the prose after it
     // carries on from there rather than starting over or skipping ahead
     expect(pages.map((p) => p.pageNumber)).toEqual(["1", "2", "3"]);
+  });
+});
+
+// --- A page turned, while the book keeps its one size --------------------------
+
+/** The same book with no page in it at all, which is what "the book's own sheet"
+ * means: a size the engine reported for a book that declared nothing but its own,
+ * rather than a number this file predicted from the size attribute it wrote. */
+const proseOnly = (size: string): string =>
+  [`<Book size="${size}">`, '<Section columns="1">', "Short prose, and no card at all.", "</Section>", "</Book>"].join(
+    "\n",
+  );
+
+const sheetOf = (inspection: PageInspection, pageIndex: number): { width: number; height: number } => {
+  const found = inspection.pageSizes[pageIndex];
+  if (found === undefined) throw new Error(`the engine reported no page ${pageIndex}`);
+  return { width: found.width, height: found.height };
+};
+
+/** The sheet the block written on `line` landed on -- read from the engine's own
+ * page index for that block, so a claim about "the card's sheet" cannot drift onto
+ * a neighbour's if the book ever paginates differently. */
+const sheetForLine = (inspection: PageInspection, line: number): { width: number; height: number } => {
+  const placed = inspection.positions[String(line)];
+  if (placed === undefined || placed.pageIndex === null) throw new Error(`nothing was measured for line ${line}`);
+  return sheetOf(inspection, placed.pageIndex);
+};
+
+const turned = (sheet: { width: number; height: number }): { width: number; height: number } => ({
+  width: sheet.height,
+  height: sheet.width,
+});
+
+test.describe("a page can be turned while the book keeps its one size", () => {
+  test("a landscape page reports the book's own sheet turned, and the pages around it report it upright", async ({
+    page,
+  }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    // #given: a card turned landscape between two runs of prose, and the same book
+    // with no card in it, which is what the book's own sheet measures as
+    // #when: the real engine paginates both
+    const measured = await page.evaluate(
+      (source) => window.__paginateAndInspect(source),
+      proseAroundACard("A5", '<Page orientation="landscape">'),
+    );
+    const bookAlone = await page.evaluate((source) => window.__paginateAndInspect(source), proseOnly("A5"));
+
+    // #then: the card's own sheet is the book's, turned; the prose on either side
+    // of it is on the book's sheet as it was
+    const sheet = sheetOf(bookAlone, 0);
+    expect({
+      before: sheetForLine(measured, 3),
+      theCard: sheetForLine(measured, 5),
+      after: sheetForLine(measured, 9),
+    }).toEqual({ before: sheet, theCard: turned(sheet), after: sheet });
+  });
+
+  test("a book bound at a size it spelled out is turned, not resized", async ({ page }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    // #given: a book whose size is two lengths rather than a format's name -- the
+    // shape an orientation keyword cannot be attached to, so the sheet has to be
+    // turned by composing it
+    // #when: the real engine paginates it, and the same book with no card
+    const measured = await page.evaluate(
+      (source) => window.__paginateAndInspect(source),
+      proseAroundACard("90mm 160mm", '<Page orientation="landscape">'),
+    );
+    const bookAlone = await page.evaluate((source) => window.__paginateAndInspect(source), proseOnly("90mm 160mm"));
+
+    // #then: the card is the same sheet on its side, not a sheet of some other size
+    // the engine fell back to
+    const sheet = sheetOf(bookAlone, 0);
+    expect({
+      before: sheetForLine(measured, 3),
+      theCard: sheetForLine(measured, 5),
+      after: sheetForLine(measured, 9),
+    }).toEqual({ before: sheet, theCard: turned(sheet), after: sheet });
+  });
+
+  test("a page that declares no orientation is on the book's own sheet, like every other page", async ({ page }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    // #given: a card written exactly as it was before a page could be turned
+    // #when: the real engine paginates it, and the same book with no card
+    const measured = await page.evaluate((source) => window.__paginateAndInspect(source), PROSE_PAGE_PROSE);
+    const bookAlone = await page.evaluate((source) => window.__paginateAndInspect(source), proseOnly("A5"));
+
+    // #then: every page of the book, the card's included, is the sheet the book
+    // declared -- the card was given no orientation of its own to be turned by
+    const sheet = sheetOf(bookAlone, 0);
+    expect({
+      before: sheetForLine(measured, 3),
+      theCard: sheetForLine(measured, 5),
+      after: sheetForLine(measured, 9),
+    }).toEqual({ before: sheet, theCard: sheet, after: sheet });
+  });
+
+  test("a book bound the wide way has its one upright page turned back", async ({ page }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    // #given: a book bound landscape -- lengths, so the sheet has to be composed --
+    // with one page the author asked to stand upright
+    // #when: the real engine paginates it, and the same book with no card
+    const measured = await page.evaluate(
+      (source) => window.__paginateAndInspect(source),
+      proseAroundACard("160mm 90mm", '<Page orientation="portrait">'),
+    );
+    const bookAlone = await page.evaluate((source) => window.__paginateAndInspect(source), proseOnly("160mm 90mm"));
+
+    // #then: the card stands up while the book stays lying down -- the other way
+    // round from every case above, which is the only way to tell that the upright
+    // arm composes a sheet at all rather than sharing the landscape one's
+    const sheet = sheetOf(bookAlone, 0);
+    expect({
+      before: sheetForLine(measured, 3),
+      theCard: sheetForLine(measured, 5),
+      after: sheetForLine(measured, 9),
+    }).toEqual({ before: sheet, theCard: turned(sheet), after: sheet });
   });
 });

@@ -1,5 +1,5 @@
 import { Book } from "./book";
-import { BookBlock, Page, parseBook, Section, SectionContent } from "./parse-book";
+import { BookBlock, Page, PageOrientation, parseBook, Section, SectionContent } from "./parse-book";
 import { renderProse } from "./prose-renderer";
 
 /**
@@ -11,10 +11,10 @@ import { renderProse } from "./prose-renderer";
  * by the author. Sharing a name between two pages would quietly undo that and make
  * two pages one.
  *
- * No `@page <name>` rule is emitted alongside it: measured against the real engine,
- * the name on the element is the whole of what forces the breaks, and the named page
- * has nothing of its own to declare until it can be turned landscape (issue #22) or
- * have its running header suppressed (issue #21).
+ * A `@page <name>` rule is emitted beside it only once that page has something of
+ * its own to declare -- today, an orientation (ADR-0007). The breaks come from the
+ * used page name changing, so a page that declares nothing gets the name alone and
+ * an empty rule would change nothing.
  */
 const PAGE_NAME_PREFIX = "grimoire-page-";
 
@@ -38,9 +38,14 @@ const PAGE_NAME_PREFIX = "grimoire-page-";
  */
 export function renderBook(book: Book): string {
   const parsed = parseBook(book.source);
-  const bodyHtml = parsed.blocks
-    .map((block, index) => renderBlock(block, `${PAGE_NAME_PREFIX}${index + 1}`))
-    .join("\n");
+  // One name per top-level block, so the body and the page rules below always
+  // agree about which name belongs to which block.
+  const named = parsed.blocks.map((block, index) => ({ block, pageName: `${PAGE_NAME_PREFIX}${index + 1}` }));
+  const bodyHtml = named.map(({ block, pageName }) => renderBlock(block, pageName)).join("\n");
+  const pageRules = named
+    .map(({ block, pageName }) => renderPageRule(block, pageName, parsed.size))
+    .filter((rule) => rule !== "")
+    .join("\n  ");
 
   return `<!doctype html>
 <html lang="${parsed.lang}">
@@ -88,6 +93,16 @@ export function renderBook(book: Book): string {
   body { font-family: serif; line-height: 1.5; }
   section { column-gap: 8mm; }
   ${parsed.theme?.css ?? ""}
+  /* A named @page rule beats a theme's unnamed @page whatever the order, because
+     naming the page is more specific -- position is not what protects these, and
+     the file's usual last-wins reading does not apply to them. Kept last anyway,
+     so a later theme cannot look like it is meant to override them.
+
+     What position does not settle: a theme that declared a page size of its own
+     would take the book's, while a turned page is still composed from the size
+     the book declared, so the two would describe different sheets. No theme does
+     today. Issue #28 carries it. */
+  ${pageRules}
 </style>
 </head>
 <body>
@@ -111,11 +126,12 @@ function renderBlock(block: BookBlock, pageName: string): string {
 }
 
 /**
- * The page's own element carries the named page, and that is the whole of its
- * styling. Naming the page is what supplies the frame of reference an author's
- * coordinates resolve against: the content gets a sheet to itself, so `top: 40mm`
- * is 40mm down *that* page's area rather than 40mm down whichever page the prose
- * happened to reach.
+ * The page's own element carries the named page, and that is the whole of the
+ * styling on the element itself -- whatever the page declares of its own goes in
+ * the `@page <name>` rule above. Naming the page is what supplies the frame of
+ * reference an author's coordinates resolve against: the content gets a sheet to
+ * itself, so `top: 40mm` is 40mm down *that* page's area rather than 40mm down
+ * whichever page the prose happened to reach.
  *
  * Deliberately no `position: relative` on this element, though ADR-0007 records one.
  * Measured against the real engine: Vivliostyle already makes the page area the
@@ -139,6 +155,76 @@ function renderPage(page: Page, pageName: string): string {
   return `<div class="page" data-grimoire-page data-line="${page.line}" style="page: ${pageName};">
 ${contentHtml}
 </div>`;
+}
+
+/**
+ * What a named page declares of its own, or the empty string when it has nothing to
+ * declare and the rule is therefore not emitted at all (ADR-0007). Kept as a list of
+ * declarations rather than one string because the suppressed running header (issue
+ * #21) is the second thing that belongs in this same rule.
+ */
+function renderPageRule(block: BookBlock, pageName: string, bookSize: string): string {
+  switch (block.kind) {
+    case "section":
+      return "";
+    case "page": {
+      const declarations: string[] = [];
+      if (block.orientation !== undefined) declarations.push(`size: ${sheetTurned(bookSize, block.orientation)};`);
+      if (declarations.length === 0) return "";
+      return `@page ${pageName} { ${declarations.join(" ")} }`;
+    }
+  }
+}
+
+const ORIENTATIONS = new Set(["portrait", "landscape"]);
+/** An absolute CSS length, which is all `@page size` accepts. */
+const CSS_LENGTH = /^(\d*\.?\d+)(mm|cm|in|q|pt|pc|px)$/i;
+const PX_PER_UNIT: Readonly<Record<string, number>> = {
+  mm: 96 / 25.4,
+  cm: 96 / 2.54,
+  in: 96,
+  q: 96 / 101.6,
+  pt: 96 / 72,
+  pc: 16,
+  px: 1,
+};
+
+function lengthInPx(token: string): number | undefined {
+  const match = CSS_LENGTH.exec(token);
+  if (match === null) return undefined;
+  return Number(match[1]) * PX_PER_UNIT[match[2]!.toLowerCase()]!;
+}
+
+/**
+ * The book's own sheet, turned the way this page asked for. A page never chooses a
+ * size, only which way the book's sheet lies (CONTEXT.md's Page), so this composes
+ * the two rather than letting a page declare a size of its own.
+ *
+ * Two shapes reach it, because `@page size` takes either a named page size with an
+ * optional orientation keyword or one or two explicit lengths -- and the keyword
+ * cannot be combined with lengths, so `90mm 160mm landscape` is not a size at all.
+ * A named size therefore hands the turning to the engine's own keyword, while
+ * explicit lengths are ordered here: the longer edge runs across the sheet for
+ * landscape and down it for portrait, so a book already bound the wide way is not
+ * turned back by a page that asks for the way it already lies. One length is a
+ * square sheet, which is the same sheet however it is turned.
+ *
+ * An orientation the book itself declared is dropped first: it is the book saying
+ * how its sheet lies, and this page has just said otherwise.
+ */
+function sheetTurned(bookSize: string, orientation: PageOrientation): string {
+  const declared = bookSize
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token !== "" && !ORIENTATIONS.has(token.toLowerCase()));
+  const lengths = declared.map(lengthInPx);
+
+  if (declared.length === 1 && lengths[0] !== undefined) return declared[0]!;
+  if (declared.length === 2 && lengths[0] !== undefined && lengths[1] !== undefined) {
+    const [across, down] = lengths[0] >= lengths[1] ? [declared[0]!, declared[1]!] : [declared[1]!, declared[0]!];
+    return orientation === "landscape" ? `${across} ${down}` : `${down} ${across}`;
+  }
+  return [...declared, orientation].join(" ");
 }
 
 function renderSection(section: Section): string {
