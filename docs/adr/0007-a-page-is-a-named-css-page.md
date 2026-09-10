@@ -6,7 +6,8 @@ engine.
 
 The obvious one is a block element sized to the page area with `position: relative`, given
 `break-before: page` and `break-after: page`. The other is CSS Paged Media's own named
-pages: a `@page <name>` rule, and `page: <name>` on the element.
+pages: `page: <name>` on the element, and a `@page <name>` rule for whatever that named
+page declares of its own.
 
 We take the named page. This ADR records the measurements, because both routes work well
 enough in a first test that the difference only shows under pressure.
@@ -31,6 +32,13 @@ None of that had to be built. The hand-rolled canvas gets none of it: it needs t
 size restated in CSS, its own break declarations, and it cannot carry a size, a margin or
 a margin box of its own at all.
 
+Every line above was measured with a `@page <name>` rule declared, because each of those
+behaviours is something that rule asks for. The break on both sides is the exception: it
+comes from the used page name changing, so `page: <name>` on the element produces it
+alone, and an empty rule beside it changes nothing. The renderer therefore emits the rule
+only once a page has something of its own to declare -- an orientation, a suppressed
+running header -- and emits the name always.
+
 ## The trap that decided it
 
 A canvas sized to the page area fragments when a child's top margin collapses through its
@@ -50,9 +58,23 @@ produced two pages, both carrying the named page's own margin box. So "exactly o
 remains ours to check, by counting the pages the content occupied, exactly as decided
 before this measurement.
 
-The renderer emits the `position: relative` wrapper that makes `top`/`left` inside a page
-mean what the author expects. Leaving that to the author would make `Page` worth no more
-than a `div`.
+## The frame of reference comes free, and this record was wrong about how
+
+We wrote here that the renderer would emit a `position: relative` wrapper to make
+`top`/`left` inside a page mean what the author expects. Measured while building the
+page, that wrapper is not needed and is actively harmful. The engine already makes the
+page area the containing block for absolutely positioned content on a named page.
+Interposing a wrapper of our own takes that away, because the wrapper is as tall as its
+content rather than as tall as the page: a box declared `bottom: 20mm` then lands 20mm
+below the top of the sheet instead of 20mm above its foot, `top: 50%` resolves against a
+box of no height, and a page opening with a heading drifts 5.67mm down as that heading's
+margin collapses through the wrapper -- the same margin-collapse trap this record
+describes above, reintroduced by the fix for it. Sizing the wrapper to the page would
+correct all three, and is exactly the hand-rolled canvas measured and rejected above.
+
+So the renderer emits the page name and nothing else. The frame of reference is the page
+area itself, which is what makes a `Page` worth more than a `div`: a `div` an author
+writes gets no sheet of its own to resolve against.
 
 ## Content pushed off the sheet is not reported
 

@@ -8,6 +8,8 @@ const NODE_NAME: Record<TagLine["kind"], string> = {
   "book-close": "BookCloseTag",
   "section-open": "SectionOpenTag",
   "section-close": "SectionCloseTag",
+  "page-open": "PageOpenTag",
+  "page-close": "PageCloseTag",
   "page-break": "PageBreakTag",
   "column-break": "ColumnBreakTag",
 };

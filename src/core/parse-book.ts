@@ -32,10 +32,34 @@ export type SectionContent = ProseBlock | PageBreak | ColumnBreak;
 
 /** A run of pages sharing one column count (CONTEXT.md's Section). */
 export interface Section {
+  readonly kind: "section";
   readonly columns: number;
   readonly line: number;
   readonly content: readonly SectionContent[];
 }
+
+/**
+ * Exactly one physical page the author composes rather than the engine fills
+ * (CONTEXT.md's Page): a character sheet, a reference card, a table meant to sit
+ * alone. It sits beside a section rather than inside one, because a section is the
+ * flow a page opts out of, so it carries no column count. `render-book.ts` gives it
+ * a named CSS page (ADR-0007), which is what makes the engine end the block before
+ * it and start the block after it on a fresh page with nothing declared by the
+ * author.
+ */
+export interface Page {
+  readonly kind: "page";
+  readonly line: number;
+  readonly content: readonly SectionContent[];
+}
+
+/**
+ * One entry at the top level of a book. Closed discriminated union in the style
+ * ADR-0004 records: a third kind added here fails the build at every site that
+ * switches on `kind` until that site handles it, rather than being silently
+ * dropped from the rendered book.
+ */
+export type BookBlock = Section | Page;
 
 export interface ParsedBook {
   readonly size: string;
@@ -46,7 +70,9 @@ export interface ParsedBook {
    * otherwise. Drives `render-book.ts`'s `<html lang>` and, through it,
    * which `hyphens: auto` rule applies. */
   readonly lang: string;
-  readonly sections: readonly Section[];
+  /** Sections and pages in the order the author wrote them -- a page is a
+   * peer of a section at the top level, not something nested inside one. */
+  readonly blocks: readonly BookBlock[];
 }
 
 const VALID_SIZE = /^[A-Za-z0-9.\s]+$/;
@@ -76,12 +102,12 @@ function tagAt(doc: Doc, i: number): TagLine | undefined {
 }
 
 /**
- * Turns a book's source into its structure: a page size and the sections that make
- * it up. A `<Book>` wrapper is optional -- plain Markdown with no tags at all is a
- * complete, valid book, sized by `DEFAULT_PAGE_SIZE` and laid out as one single-column
- * section, which keeps issue #2's bare-prose books working unchanged. A `<Section>`
- * wrapper is likewise optional inside `<Book>`: content with no explicit section is
- * treated the same way, as one implicit single-column section.
+ * Turns a book's source into its structure: a page size and the sections and pages
+ * that make it up. A `<Book>` wrapper is optional -- plain Markdown with no tags at
+ * all is a complete, valid book, sized by `DEFAULT_PAGE_SIZE` and laid out as one
+ * single-column section, which keeps issue #2's bare-prose books working unchanged.
+ * A `<Section>` wrapper is likewise optional inside `<Book>`: content with no
+ * explicit section is treated the same way, as one implicit single-column section.
  *
  * Throws `MarkupError` on malformed markup (an unclosed or nested tag, a break or
  * prose line outside a `<Section>`, an invalid attribute). Reporting that to an
@@ -107,7 +133,7 @@ export function parseBook(source: string): ParsedBook {
       size: DEFAULT_PAGE_SIZE,
       theme: undefined,
       lang: FALLBACK_LANG,
-      sections: parseBookBody(doc, 0, lines.length),
+      blocks: parseBookBody(doc, 0, lines.length),
     };
   }
 
@@ -122,7 +148,7 @@ export function parseBook(source: string): ParsedBook {
     size: resolveSize(bookOpen.size, bookOpenIndex),
     theme,
     lang: theme?.lang ?? FALLBACK_LANG,
-    sections: parseBookBody(doc, bookOpenIndex + 1, bookCloseIndex),
+    blocks: parseBookBody(doc, bookOpenIndex + 1, bookCloseIndex),
   };
 }
 
@@ -148,26 +174,29 @@ function resolveSize(size: string | undefined, tagLine: number): string {
 }
 
 /**
- * Content with no `<Section>` tag anywhere in it becomes one implicit single-column
- * section; content with at least one `<Section>` tag is parsed strictly, since mixing
- * the two within one scope would leave prose with no declared column count.
+ * Content with no `<Section>` and no `<Page>` tag anywhere in it becomes one implicit
+ * single-column section; content with at least one of either is parsed strictly, since
+ * mixing the two within one scope would leave prose with no declared column count.
  */
-function parseBookBody(doc: Doc, from: number, to: number): Section[] {
-  let hasSection = false;
+function parseBookBody(doc: Doc, from: number, to: number): BookBlock[] {
+  let hasBlock = false;
   for (let i = from; i < to; i++) {
-    if (tagAt(doc, i)?.kind === "section-open") {
-      hasSection = true;
+    const kind = tagAt(doc, i)?.kind;
+    if (kind === "section-open" || kind === "page-open") {
+      hasBlock = true;
       break;
     }
   }
-  if (!hasSection) {
-    return [{ columns: 1, line: from + 1, content: parseSectionContent(doc, from, to) }];
+  if (!hasBlock) {
+    return [{ kind: "section", columns: 1, line: from + 1, content: parseBlockContent(doc, from, to, "Section") }];
   }
-  return parseSections(doc, from, to);
+  return parseTopLevel(doc, from, to);
 }
 
-function parseSections(doc: Doc, from: number, to: number): Section[] {
-  const sections: Section[] = [];
+/** The top level of a book: sections and pages, in the order the author wrote
+ * them, with nothing but blank lines allowed between them. */
+function parseTopLevel(doc: Doc, from: number, to: number): BookBlock[] {
+  const blocks: BookBlock[] = [];
   let i = from;
 
   while (i < to) {
@@ -177,26 +206,36 @@ function parseSections(doc: Doc, from: number, to: number): Section[] {
         i++;
         continue;
       }
-      throw new MarkupError(`line ${i + 1} has content outside any <Section>`, i + 1);
+      throw new MarkupError(`line ${i + 1} has content outside any <Section> or <Page>`, i + 1);
     }
-    if (tag.kind !== "section-open") {
-      throw new MarkupError(
-        `unexpected <${describeTag(tag.kind)}> on line ${i + 1}: content here must be inside a <Section>`,
-        i + 1,
-      );
+    if (tag.kind === "section-open") {
+      const closeIndex = findMatchingClose(doc, i + 1, to, "section-open", "section-close", "Section");
+      blocks.push({
+        kind: "section",
+        columns: resolveColumns(tag.columns, i),
+        line: i + 1,
+        content: parseBlockContent(doc, i + 1, closeIndex, "Section"),
+      });
+      i = closeIndex + 1;
+      continue;
     }
-
-    const sectionLine = i;
-    const closeIndex = findMatchingClose(doc, i + 1, to, "section-open", "section-close", "Section");
-    sections.push({
-      columns: resolveColumns(tag.columns, sectionLine),
-      line: sectionLine + 1,
-      content: parseSectionContent(doc, sectionLine + 1, closeIndex),
-    });
-    i = closeIndex + 1;
+    if (tag.kind === "page-open") {
+      const closeIndex = findMatchingClose(doc, i + 1, to, "page-open", "page-close", "Page");
+      blocks.push({
+        kind: "page",
+        line: i + 1,
+        content: parseBlockContent(doc, i + 1, closeIndex, "Page"),
+      });
+      i = closeIndex + 1;
+      continue;
+    }
+    throw new MarkupError(
+      `unexpected <${describeTag(tag.kind)}> on line ${i + 1}: content here must be inside a <Section> or a <Page>`,
+      i + 1,
+    );
   }
 
-  return sections;
+  return blocks;
 }
 
 function resolveColumns(columns: string | undefined, tagLine: number): number {
@@ -211,7 +250,9 @@ function resolveColumns(columns: string | undefined, tagLine: number): number {
   return parsed;
 }
 
-function parseSectionContent(doc: Doc, from: number, to: number): SectionContent[] {
+/** `container` names the enclosing tag only so an unexpected tag inside it is
+ * reported against the block the author actually opened. */
+function parseBlockContent(doc: Doc, from: number, to: number, container: "Section" | "Page"): SectionContent[] {
   const content: SectionContent[] = [];
   let buffer: string[] = [];
   let bufferStart: number | null = null;
@@ -237,7 +278,7 @@ function parseSectionContent(doc: Doc, from: number, to: number): SectionContent
       continue;
     }
     if (tag !== undefined) {
-      throw new MarkupError(`unexpected <${describeTag(tag.kind)}> on line ${i + 1} inside a <Section>`, i + 1);
+      throw new MarkupError(`unexpected <${describeTag(tag.kind)}> on line ${i + 1} inside a <${container}>`, i + 1);
     }
 
     if (bufferStart === null) bufferStart = i + 1;

@@ -9,6 +9,25 @@ declare global {
     positions: Record<string, { x?: number; y?: number; pageIndex: number | null }>;
   }
 
+  /** One element's position on the page it landed on: the page's own index, the
+   * element's offset from that page's top-left corner in CSS pixels, its own
+   * height, and the height of the whole sheet it landed on. The last two are what
+   * make a box anchored to the foot of the page measurable. */
+  interface PageBox {
+    pageIndex: number;
+    x: number;
+    y: number;
+    height: number;
+    pageHeight: number;
+  }
+
+  interface PageMeasurement {
+    pageCount: number;
+    /** Keyed `line-<data-line>` for a rendered block, `probe-<data-probe>` for an
+     * element the book's own source marked. Absent when nothing carried the key. */
+    boxes: Record<string, PageBox | undefined>;
+  }
+
   interface HeaderInspection {
     pageIndex: number;
     header: string | undefined;
@@ -33,6 +52,7 @@ declare global {
     __previewAfterEngineFailure: (goodSource: string, nextSource: string) => Promise<ContainerAfterFailure>;
     __previewAfterFirstEverEngineFailure: (source: string) => Promise<ContainerAfterFailure>;
     __paginateAndInspect: (source: string) => Promise<PageInspection>;
+    __paginateAndMeasure: (source: string) => Promise<PageMeasurement>;
     __paginateAndInspectHeaders: (source: string) => Promise<HeaderInspection[]>;
     __inspectMarginBoxFonts: (source: string) => Promise<MarginBoxFontInspection>;
     __inspectFonts: (source: string, selectors: readonly string[]) => Promise<Record<string, string | undefined>>;

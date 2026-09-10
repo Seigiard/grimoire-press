@@ -243,6 +243,59 @@
         iframe.remove();
         return result;
       };
+
+      // Issue #20's seam: a book's source in, real geometry out, measured against
+      // the page each element actually landed on rather than against the preview
+      // pane. A page's whole claim is that it is a frame of reference, so a
+      // coordinate only means something once it is expressed relative to its own
+      // page -- and `__paginateAndInspect` above reports viewport coordinates,
+      // in which every page sits somewhere different.
+      //
+      // Vivliostyle lays out every page but shows only the one being viewed,
+      // hiding the rest behind `display: none` on their page container; a hidden
+      // page's elements report empty client rects, so without this a book of more
+      // than one page could only ever be measured on its first. Showing them again
+      // reads back geometry the engine has already computed -- it asks the engine
+      // for nothing new and changes nothing about how the book was laid out.
+      //
+      // Keyed by the `data-line` render-book.ts tags every rendered block with, and
+      // by `data-probe`, which a test's own book source puts on an element it wants
+      // to find again -- raw HTML an author may write by ADR-0006, and the only way
+      // to ask where a positioned box the author placed actually landed.
+      window.__paginateAndMeasure = async (source) => {
+        const html = renderBook({ source });
+        const container = document.getElementById("preview");
+        const { pageCount } = await paginate(container, html);
+
+        for (const pageContainer of container.querySelectorAll("[data-vivliostyle-page-container]")) {
+          pageContainer.style.display = "block";
+        }
+
+        const boxes = {};
+        // A block that spills across a page boundary is rendered once per page it
+        // occupies; the first is where it starts, which is the one a break point or
+        // an offset is about.
+        const record = (key, el) => {
+          if (key in boxes) return;
+          const rects = el.getClientRects();
+          const pageEl = el.closest("[data-vivliostyle-page-index]");
+          if (rects.length === 0 || pageEl === null) return;
+          const page = pageEl.getBoundingClientRect();
+          boxes[key] = {
+            pageIndex: Number(pageEl.getAttribute("data-vivliostyle-page-index")),
+            x: rects[0].x - page.x,
+            y: rects[0].y - page.y,
+            height: rects[0].height,
+            // The whole sheet, margins included. A box anchored to the foot of the
+            // page area is only measurable against this.
+            pageHeight: page.height,
+          };
+        };
+        for (const el of container.querySelectorAll("[data-line]")) record(`line-${el.getAttribute("data-line")}`, el);
+        for (const el of container.querySelectorAll("[data-probe]")) record(`probe-${el.getAttribute("data-probe")}`, el);
+
+        return { pageCount, boxes };
+      };
     </script>
   </body>
 </html>

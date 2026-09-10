@@ -225,3 +225,58 @@ describe("parseBook unknown-tag detection", () => {
     }
   });
 });
+
+/**
+ * Issue #20's vocabulary: the top level of a book stops being a list of sections and
+ * becomes an ordered list of sections and pages. The consumer is render-book.ts,
+ * which walks that list to build the document, and through it an author who wrote a
+ * character sheet between two chapters. The observable failure is a page dropped
+ * from the book, or landing somewhere other than where the author wrote it. The
+ * oracle is the fixture itself: the order this test wrote the blocks in and the
+ * count of the fixture's own lines, neither of which parse-book.ts computes.
+ */
+describe("parseBook top-level blocks", () => {
+  it("carries sections and pages in the order the author wrote them", () => {
+    // #given: a book with a page written between two sections
+    const source = [
+      '<Book size="A5">',
+      '<Section columns="1">',
+      "Prose before the card.",
+      "</Section>",
+      "<Page>",
+      "A card that stands on its own.",
+      "</Page>",
+      '<Section columns="2">',
+      "Prose after the card.",
+      "</Section>",
+      "</Book>",
+    ].join("\n");
+
+    // #when: it is parsed
+    const parsed = parseBook(source);
+
+    // #then: all three blocks are there, in that order, each naming the line it was
+    // opened on and holding the prose written inside it
+    expect(parsed.blocks).toEqual([
+      { kind: "section", columns: 1, line: 2, content: [{ kind: "prose", source: "Prose before the card.", line: 3 }] },
+      { kind: "page", line: 5, content: [{ kind: "prose", source: "A card that stands on its own.", line: 6 }] },
+      { kind: "section", columns: 2, line: 8, content: [{ kind: "prose", source: "Prose after the card.", line: 9 }] },
+    ]);
+  });
+
+  it("treats a book that is nothing but a page as that one page", () => {
+    // #given: a book whose author wrote a card and no section at all -- the case
+    // that decides whether a page counts as a block in its own right, or whether
+    // only a <Section> makes the top level of a book something to be parsed
+    const source = ['<Book size="A5">', "<Page>", "A card that stands on its own.", "</Page>", "</Book>"].join("\n");
+
+    // #when: it is parsed
+    const parsed = parseBook(source);
+
+    // #then: the page is the book's only block, not prose wrapped in an implicit
+    // section it never asked for
+    expect(parsed.blocks).toEqual([
+      { kind: "page", line: 2, content: [{ kind: "prose", source: "A card that stands on its own.", line: 3 }] },
+    ]);
+  });
+});
