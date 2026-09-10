@@ -11,10 +11,10 @@ import { renderProse } from "./prose-renderer";
  * by the author. Sharing a name between two pages would quietly undo that and make
  * two pages one.
  *
- * A `@page <name>` rule is emitted beside it only once that page has something of
- * its own to declare -- today, an orientation (ADR-0007). The breaks come from the
- * used page name changing, so a page that declares nothing gets the name alone and
- * an empty rule would change nothing.
+ * A `@page <name>` rule is emitted beside it for whatever that page declares of its
+ * own (ADR-0007). Every page declares at least one thing -- no running header -- so
+ * every page now gets a rule; the breaks are not what it is for, since those come
+ * from the used page name changing whether a rule is there or not.
  */
 const PAGE_NAME_PREFIX = "grimoire-page-";
 
@@ -158,10 +158,28 @@ ${contentHtml}
 }
 
 /**
- * What a named page declares of its own, or the empty string when it has nothing to
- * declare and the rule is therefore not emitted at all (ADR-0007). Kept as a list of
- * declarations rather than one string because the suppressed running header (issue
- * #21) is the second thing that belongs in this same rule.
+ * A page's running header, or rather the absence of it (CONTEXT.md's Page, issue
+ * #21). The running header names where the reader is in the flow; a page has left
+ * the flow, so on a page the header would name somewhere the reader is not -- the
+ * chapter the author happened to be writing before the character sheet.
+ *
+ * `content: none` on the margin box, so the box is not generated at all rather than
+ * generated empty: the emptiness is not something an author can style back into
+ * meaning something. This is a default and not an attribute; there is no way to ask
+ * for the header back on one page.
+ *
+ * `@bottom-center` is deliberately left alone next to it. A page number is an
+ * address, not a location in the flow, and the address is still true -- so the page
+ * keeps its number, and the counter runs through it because nothing here touches it.
+ */
+const NO_RUNNING_HEADER = "@top-center { content: none; }";
+
+/**
+ * What a named page declares of its own (ADR-0007), or the empty string for a
+ * section, which declares nothing and takes the book's own `@page` rule. A list of
+ * declarations rather than one string because a page has two things to say: which
+ * way its sheet lies, when the author turned it, and that it carries no running
+ * header, which every page says.
  */
 function renderPageRule(block: BookBlock, pageName: string, bookSize: string): string {
   switch (block.kind) {
@@ -170,7 +188,7 @@ function renderPageRule(block: BookBlock, pageName: string, bookSize: string): s
     case "page": {
       const declarations: string[] = [];
       if (block.orientation !== undefined) declarations.push(`size: ${sheetTurned(bookSize, block.orientation)};`);
-      if (declarations.length === 0) return "";
+      declarations.push(NO_RUNNING_HEADER);
       return `@page ${pageName} { ${declarations.join(" ")} }`;
     }
   }
