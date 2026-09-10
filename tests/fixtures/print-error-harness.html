@@ -26,7 +26,7 @@
         const div = document.createElement("div");
         div.textContent = html;
         container.appendChild(div);
-        return Promise.resolve({ pageCount: 1, pageSizes: [] });
+        return Promise.resolve({ pageCount: 1, pageSizes: [], overflowingPages: [] });
       };
 
       // A print adapter that always rejects, standing in for a genuine

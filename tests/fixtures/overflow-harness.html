@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>page overflow test harness</title>
+    <link rel="stylesheet" href="/src/app/app.css" />
+    <style>
+      body {
+        margin: 0;
+        display: flex;
+      }
+      #editor {
+        flex: 1;
+        overflow: auto;
+      }
+      #preview {
+        flex: 1;
+        overflow: auto;
+        border-left: 1px solid #ccc;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="editor"></div>
+    <div id="preview"></div>
+    <button id="print"></button>
+    <button id="refresh"></button>
+    <button id="download"></button>
+    <input id="load" type="file" />
+    <input id="auto-refresh" type="checkbox" checked />
+    <div id="status" hidden></div>
+    <script type="module">
+      import { startApp } from "/src/app/start-app.ts";
+      import { createEditor } from "/src/adapters/editor.ts";
+      import { downloadBook, loadBookFile } from "/src/adapters/file.ts";
+      import { paginate } from "/src/adapters/pagination.ts";
+
+      // The real pagination adapter and the real engine: an overflowing page is
+      // something only a laid-out book can be, so a stand-in that answered
+      // "overflowing" because the test told it to would prove nothing about
+      // whether the editor notices one.
+      //
+      // Printing is the one thing substituted here, and only so that a *standing*
+      // status condition exists to hold the overflow report against. Issue #23
+      // asks that the two never erase each other, and a print failure is the
+      // cheapest of the three existing conditions to produce on demand: the real
+      // print engine has no failure a test can trigger without stubbing the
+      // engine itself (see tests/fixtures/print-error-harness.html), and the
+      // print adapter is a plain argument exactly so it can be substituted.
+      const failingPrint = () => Promise.reject(new Error("Vivliostyle failed to prepare the book for printing: boom"));
+
+      // No draft is read or written: each test types the book it is about, and a
+      // draft left over from the previous test would be what the preview opened
+      // on instead.
+      const noPersistence = { read: () => undefined, write: () => {} };
+
+      const editor = startApp(
+        {
+          editorContainer: document.getElementById("editor"),
+          previewContainer: document.getElementById("preview"),
+          printControl: document.getElementById("print"),
+          refreshControl: document.getElementById("refresh"),
+          autoRefreshControl: document.getElementById("auto-refresh"),
+          statusContainer: document.getElementById("status"),
+          downloadControl: document.getElementById("download"),
+          loadControl: document.getElementById("load"),
+        },
+        createEditor,
+        paginate,
+        failingPrint,
+        noPersistence,
+        downloadBook,
+        loadBookFile,
+      );
+
+      window.__editor = editor;
+    </script>
+  </body>
+</html>

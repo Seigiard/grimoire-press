@@ -1,7 +1,7 @@
 import { renderBook } from "../core/render-book";
 import type { createEditor, EditorHandle } from "../adapters/editor";
 import type { downloadBook, loadBookFile } from "../adapters/file";
-import type { paginate } from "../adapters/pagination";
+import type { OverflowingPage, paginate } from "../adapters/pagination";
 import type { printBook } from "../adapters/printing";
 import { describePreviewError, describePrintError, toPreviewError, type PreviewError } from "./preview-error";
 
@@ -11,6 +11,22 @@ const INITIAL_SOURCE = "# Untitled book\n\nStart writing your book here.\n";
 // enough that a normal typing cadence never triggers a repaint mid-word, short
 // enough that a pause reads as "done for now" rather than a stall.
 const REFRESH_DEBOUNCE_MS = 400;
+
+/**
+ * What an author reads when a page took more than the one physical page it claims
+ * (issue #23). Names the line the page was declared on, so the author can go
+ * straight to it, and how many pages it actually took, so they know how much there
+ * is to cut. Every overflowing page in the book is named: a book with two character
+ * sheets that both spilled has two problems, not one.
+ *
+ * Worded here rather than in `preview-error.ts` because this is not one of that
+ * file's error cases and must not become one -- the book paginated.
+ */
+function describeOverflowingPages(pages: readonly OverflowingPage[]): string {
+  const heading = pages.length === 1 ? "A page did not fit" : "Some pages did not fit";
+  const detail = pages.map((page) => `line ${page.line} took ${page.pages} pages`).join("; ");
+  return `${heading} — ${detail}.`;
+}
 
 /**
  * The DOM elements the app is wired to. Bundled as one named record rather than
@@ -100,18 +116,29 @@ export function startApp(
     loadControl,
   } = elements;
 
-  // The preview's staleness, a print failure, and a failed file load are three
-  // independent things an author can be told about at once (issue #6's third
-  // handed-over defect: a shared status sink let a repaint that succeeded
-  // silently erase a print error nobody had acknowledged yet). Each is tracked
-  // and rendered on its own, so clearing one never touches the others.
+  // The preview's staleness, a print failure, a failed file load and an
+  // overflowing page are four independent things an author can be told about at
+  // once (issue #6's third handed-over defect: a shared status sink let a repaint
+  // that succeeded silently erase a print error nobody had acknowledged yet).
+  // Each is tracked and rendered on its own, so clearing one never touches the
+  // others.
+  //
+  // An overflowing page is not a `PreviewError` and is deliberately held as its
+  // own thing rather than folded into `previewError` (issue #23): that union is
+  // the closed set of ways to fail to produce a book, and an overflowing page
+  // means a book *was* produced -- it just no longer matches what its author
+  // declared. Folding it in would also make the two erase each other, since the
+  // repaint that reports an overflow is the same repaint that clears the preview
+  // error.
   let previewError: PreviewError | undefined;
   let printError: PreviewError | undefined;
   let loadError: PreviewError | undefined;
+  let overflowingPages: readonly OverflowingPage[] = [];
 
   const renderStatus = (): void => {
     const parts: string[] = [];
     if (previewError !== undefined) parts.push(`Preview is out of date — ${describePreviewError(previewError)}`);
+    if (overflowingPages.length > 0) parts.push(describeOverflowingPages(overflowingPages));
     if (printError !== undefined) parts.push(`Printing failed — ${describePrintError(printError)}`);
     if (loadError !== undefined) parts.push(`Loading file failed — ${describePreviewError(loadError)}`);
     statusContainer.textContent = parts.join(" ");
@@ -130,6 +157,15 @@ export function startApp(
 
   const setLoadStatus = (error: PreviewError | undefined): void => {
     loadError = error;
+    renderStatus();
+  };
+
+  // Replaced wholesale by every repaint that produced a book, never added to, so
+  // a page the author has since cut down stops being reported the moment it fits
+  // again -- a report that only ever accumulated would pass for correct until the
+  // first time an author fixed something.
+  const setPageOverflowStatus = (pages: readonly OverflowingPage[]): void => {
+    overflowingPages = pages;
     renderStatus();
   };
 
@@ -158,7 +194,15 @@ export function startApp(
       return;
     }
     void paginateAdapter(previewContainer, html)
-      .then(() => setPreviewStatus(undefined))
+      .then((result) => {
+        setPreviewStatus(undefined);
+        setPageOverflowStatus(result.overflowingPages);
+      })
+      // A repaint that failed leaves the preview showing the last book that
+      // paginated (ADR-0005), so any overflow standing against that book is
+      // still true of what the author is looking at and is left alone. Only a
+      // repaint that produced a book has anything to say about which of its
+      // pages fit.
       .catch((error: unknown) => setPreviewStatus(toPreviewError(error)))
       .finally(afterRun);
   }
