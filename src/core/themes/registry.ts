@@ -12,5 +12,8 @@ const THEMES: Readonly<Record<string, Theme>> = {
 };
 
 export function getTheme(name: string): Theme | undefined {
-  return THEMES[name];
+  // Own properties only. A plain object literal inherits from Object.prototype, so
+  // a book declaring theme="toString" would otherwise resolve to a function and
+  // slip past the unknown-theme error entirely.
+  return Object.hasOwn(THEMES, name) ? THEMES[name] : undefined;
 }

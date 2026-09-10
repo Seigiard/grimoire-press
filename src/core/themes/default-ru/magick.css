@@ -749,7 +749,7 @@ aside h1, aside h2, aside h3, aside h4 {
 .sidenote:before {
     font-size: 1.3rem;
     position: relative;
-    font-family: "Spectral", serif;
+    font-family: "Vollkorn", serif;
 }
 
 /* Fine-adjust the number position for the sidenote anchor */

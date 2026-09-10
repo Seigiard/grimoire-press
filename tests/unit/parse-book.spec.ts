@@ -111,6 +111,16 @@ describe("parseBook error paths", () => {
     expectMarkupErrorLine(source, 1);
   });
 
+  it("rejects a theme named after an inherited Object property", () => {
+    // #given: a theme name that is not registered but does name a property every
+    // plain object inherits, which a bare registry lookup would resolve to
+    // #when: a book declares it
+    const source = ['<Book theme="toString">', '<Section columns="1">', "Some prose.", "</Section>", "</Book>"].join("\n");
+
+    // #then: it is rejected like any other unknown theme, naming its line
+    expectMarkupErrorLine(source, 1);
+  });
+
   it("names the line of an unknown theme attribute", () => {
     const source = ['<Book theme="not-a-real-theme">', '<Section columns="1">', "Some prose.", "</Section>", "</Book>"].join(
       "\n",
