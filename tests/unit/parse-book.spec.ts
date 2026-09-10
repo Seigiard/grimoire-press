@@ -29,6 +29,21 @@ function expectMarkupErrorLine(source: string, line: number): void {
   }
 }
 
+/** As above, plus what the author is told. Used where the mistake is one an author
+ * can make in more than one place and the message is what distinguishes them -- a
+ * break rejected because it is inside a page, say, rather than because it sits
+ * outside every block -- so a line number alone would not tell the two apart. */
+function expectMarkupError(source: string, line: number, message: RegExp): void {
+  try {
+    parseBook(source);
+    expect.unreachable("parseBook was expected to throw");
+  } catch (error) {
+    expect(error).toBeInstanceOf(MarkupError);
+    expect((error as MarkupError).line).toBe(line);
+    expect((error as MarkupError).message).toMatch(message);
+  }
+}
+
 describe("parseBook error paths", () => {
   it("names the line of an invalid size attribute", () => {
     const source = ['<Book size="A5;bad">', '<Section columns="1">', "Some prose.", "</Section>", "</Book>"].join("\n");
@@ -278,5 +293,128 @@ describe("parseBook top-level blocks", () => {
     expect(parsed.blocks).toEqual([
       { kind: "page", line: 2, content: [{ kind: "prose", source: "A card that stands on its own.", line: 3 }] },
     ]);
+  });
+});
+
+/**
+ * Issue #24: the mistakes an author can make writing a page, told the way the same
+ * mistake is already told inside a section. The consumer is an author who reached
+ * for a break out of habit, forgot a closing tag, or tried to lay a page out in
+ * columns. The observable failure is either silence -- markup that does nothing and
+ * says nothing, leaving the author to wonder why the break had no effect -- or an
+ * error that names the wrong line, or one whose wording gives no reason and so
+ * sends the author looking for a fault that is not there.
+ *
+ * The oracle is the fixture itself, as in the suites above: the expected line comes
+ * from counting the literal source each test wrote, never from anything
+ * parse-book.ts computes. Where the message is asserted it is asserted on the part
+ * an author reads for the reason, not on the whole sentence.
+ */
+describe("parseBook page vocabulary", () => {
+  it("rejects a page break inside a page, saying the page is already one page", () => {
+    // #given: a page whose author reached for a page break inside it (line 4)
+    const source = [
+      '<Book size="A5">',
+      "<Page>",
+      "A card that stands on its own.",
+      "<PageBreak />",
+      "</Page>",
+      "</Book>",
+    ].join("\n");
+
+    // #when: it is parsed
+    // #then: the break is rejected on its own line, with the reason it makes no
+    // sense there rather than a bare "unexpected tag"
+    expectMarkupError(source, 4, /already one page/);
+  });
+
+  it("rejects a column break inside a page, saying a page has no columns to break", () => {
+    // #given: a page whose author reached for a column break inside it (line 4)
+    const source = [
+      '<Book size="A5">',
+      "<Page>",
+      "A card that stands on its own.",
+      "<ColumnBreak />",
+      "</Page>",
+      "</Book>",
+    ].join("\n");
+
+    // #when: it is parsed
+    // #then: rejected on its own line, and for the reason that belongs to a column
+    // break rather than the one that belongs to a page break
+    expectMarkupError(source, 4, /no columns to break/);
+  });
+
+  it("names the line a page was opened on when it is never closed", () => {
+    // #given: a page opened on line 2 and never closed
+    const source = ['<Book size="A5">', "<Page>", "A card that stands on its own.", "</Book>"].join("\n");
+
+    // #when: it is parsed
+    // #then: the same shape an unclosed <Section> already produces -- the line the
+    // block was opened on, and the closing tag that is missing
+    expectMarkupError(source, 2, /<Page> opened on line 2 is never closed with <\/Page>/);
+  });
+
+  it("names the line of a page nested inside another page", () => {
+    // #given: a page opened again (line 3) inside a page
+    const source = [
+      '<Book size="A5">',
+      "<Page>",
+      "<Page>",
+      "A card that stands on its own.",
+      "</Page>",
+      "</Page>",
+      "</Book>",
+    ].join("\n");
+
+    // #when: it is parsed
+    // #then: the inner page's own line, in the same shape as the existing nesting
+    // error -- not the outer page's line, and not an "unexpected tag"
+    expectMarkupError(source, 3, /<Page> cannot be nested inside another <Page>/);
+  });
+
+  it("rejects a column count declared on a page", () => {
+    // #given: a page an author tried to give a column count (line 2)
+    const source = ['<Book size="A5">', '<Page columns="2">', "A card that stands on its own.", "</Page>", "</Book>"].join(
+      "\n",
+    );
+
+    // #when: it is parsed
+    // #then: the attribute is rejected on the line it was written on, and the
+    // author is told a page has no columns -- rather than the line falling through
+    // to prose and being reported as content outside any block, which names the
+    // right line for the wrong reason
+    expectMarkupError(source, 2, /<Page columns="2">.*a page has no columns/);
+  });
+
+  it("leaves a break inside a section working, so the reason above is about pages and not about breaks", () => {
+    // #given: a section holding both kinds of break (lines 4 and 6)
+    const source = [
+      '<Book size="A5">',
+      '<Section columns="2">',
+      "Prose.",
+      "<PageBreak />",
+      "More prose.",
+      "<ColumnBreak />",
+      "Yet more prose.",
+      "</Section>",
+      "</Book>",
+    ].join("\n");
+
+    // #when: it is parsed
+    // #then: both breaks are part of the section's content, on the lines they were
+    // written on
+    const parsed = parseBook(source);
+
+    expect(parsed.blocks[0]).toMatchObject({
+      kind: "section",
+      content: [
+        { kind: "prose", line: 3 },
+        { kind: "page-break", line: 4 },
+        { kind: "prose", line: 5 },
+        { kind: "column-break", line: 6 },
+        { kind: "prose", line: 7 },
+      ],
+    });
   });
 });

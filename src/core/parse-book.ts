@@ -42,10 +42,11 @@ export interface Section {
  * Exactly one physical page the author composes rather than the engine fills
  * (CONTEXT.md's Page): a character sheet, a reference card, a table meant to sit
  * alone. It sits beside a section rather than inside one, because a section is the
- * flow a page opts out of, so it carries no column count. `render-book.ts` gives it
- * a named CSS page (ADR-0007), which is what makes the engine end the block before
- * it and start the block after it on a fresh page with nothing declared by the
- * author.
+ * flow a page opts out of, so it carries no column count and no break of either
+ * kind: both are ways of steering a flow this block has left. `render-book.ts`
+ * gives it a named CSS page (ADR-0007), which is what makes the engine end the
+ * block before it and start the block after it on a fresh page with nothing
+ * declared by the author.
  */
 export interface Page {
   readonly kind: "page";
@@ -110,8 +111,9 @@ function tagAt(doc: Doc, i: number): TagLine | undefined {
  * explicit section is treated the same way, as one implicit single-column section.
  *
  * Throws `MarkupError` on malformed markup (an unclosed or nested tag, a break or
- * prose line outside a `<Section>`, an invalid attribute). Reporting that to an
- * author is issue #6's preview error surface; this only needs to fail clearly.
+ * prose line outside a `<Section>`, a break or column count on a `<Page>`, an
+ * invalid attribute). Reporting that to an author is issue #6's preview error
+ * surface; this only needs to fail clearly.
  */
 export function parseBook(source: string): ParsedBook {
   const lines = source.split("\n");
@@ -220,6 +222,7 @@ function parseTopLevel(doc: Doc, from: number, to: number): BookBlock[] {
       continue;
     }
     if (tag.kind === "page-open") {
+      assertNoColumnCount(tag.columns, i);
       const closeIndex = findMatchingClose(doc, i + 1, to, "page-open", "page-close", "Page");
       blocks.push({
         kind: "page",
@@ -238,6 +241,22 @@ function parseTopLevel(doc: Doc, from: number, to: number): BookBlock[] {
   return blocks;
 }
 
+/**
+ * A page has no column count, at any value: a column count says how a flow is laid
+ * out, and a page is the one construct that exists to leave the flow (CONTEXT.md's
+ * Page). Rejected by name rather than ignored, so an author who reached for it is
+ * told why a page does not have it instead of watching the attribute do nothing.
+ * Only `columns` is refused here -- an attribute a page really does take is read
+ * elsewhere from the same tag and is no business of this check.
+ */
+function assertNoColumnCount(columns: string | undefined, tagLine: number): void {
+  if (columns === undefined) return;
+  throw new MarkupError(
+    `<Page columns="${columns}"> on line ${tagLine + 1} declares a column count, but a page has no columns`,
+    tagLine + 1,
+  );
+}
+
 function resolveColumns(columns: string | undefined, tagLine: number): number {
   if (columns === undefined) return 1;
   const parsed = Number.parseInt(columns, 10);
@@ -249,6 +268,18 @@ function resolveColumns(columns: string | undefined, tagLine: number): number {
   }
   return parsed;
 }
+
+/**
+ * Why neither kind of break means anything inside a page, phrased as the answer to
+ * the question the author was actually asking. A break is not merely "unexpected"
+ * there the way a stray `</Book>` is: an author who wrote one wanted something a
+ * page already is, or something a page does not have, and saying which is what
+ * stops them looking for a fault that is not there.
+ */
+const BREAK_INSIDE_PAGE: Record<PageBreak["kind"] | ColumnBreak["kind"], string> = {
+  "page-break": "a page is already one page",
+  "column-break": "a page has no columns to break",
+};
 
 /** `container` names the enclosing tag only so an unexpected tag inside it is
  * reported against the block the author actually opened. */
@@ -273,6 +304,12 @@ function parseBlockContent(doc: Doc, from: number, to: number, container: "Secti
     const tag = tagAt(doc, i);
 
     if (tag?.kind === "page-break" || tag?.kind === "column-break") {
+      if (container === "Page") {
+        throw new MarkupError(
+          `unexpected <${describeTag(tag.kind)}> on line ${i + 1} inside a <Page>: ${BREAK_INSIDE_PAGE[tag.kind]}`,
+          i + 1,
+        );
+      }
       flush();
       content.push({ kind: tag.kind, line: i + 1 });
       continue;

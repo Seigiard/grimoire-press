@@ -20,11 +20,14 @@ const ATTR = /([A-Za-z]+)="([^"]*)"/g;
 const BOOK_CLOSE = /^<\/Book>$/;
 const SECTION_OPEN = /^<Section(?:\s+columns="([^"]*)")?\s*>$/;
 const SECTION_CLOSE = /^<\/Section>$/;
-// `<Page>` carries no attributes: a page declares no column count (it exists to
-// escape the flow a column count describes) and no size (a book is bound at one
-// format). Written to reject `<PageBreak />` by construction -- the `>` is
-// anchored straight after the name, so only the bare element matches.
-const PAGE_OPEN = /^<Page\s*>$/;
+// `<Page>`'s attribute run is captured the way `<Book>`'s is, rather than refused
+// outright. A page declares no column count -- it exists to escape the flow a
+// column count describes -- but recognising `<Page columns="2">` as a page is what
+// lets `parse-book.ts` tell its author that, instead of the line failing to match
+// any tag and being reported as prose outside every block. Still rejects
+// `<PageBreak />` by construction: an attribute run must start with whitespace, and
+// `Break` follows the name with none, so nothing can absorb it.
+const PAGE_OPEN = /^<Page((?:\s+[A-Za-z]+="[^"]*")*)\s*>$/;
 const PAGE_CLOSE = /^<\/Page>$/;
 const PAGE_BREAK = /^<PageBreak\s*\/>$/;
 const COLUMN_BREAK = /^<ColumnBreak\s*\/>$/;
@@ -41,7 +44,11 @@ export type TagLine =
   | { readonly kind: "book-close" }
   | { readonly kind: "section-open"; readonly columns: string | undefined }
   | { readonly kind: "section-close" }
-  | { readonly kind: "page-open" }
+  /** `columns` is carried even though a page has none, so the parser can reject it
+   * by name. A page attribute a page really does take -- `orientation`, issue #22
+   * -- is read from the same attribute run and belongs beside this, not instead of
+   * it: a page takes no column count, which is narrower than taking no attributes. */
+  | { readonly kind: "page-open"; readonly columns: string | undefined }
   | { readonly kind: "page-close" }
   | { readonly kind: "page-break" }
   | { readonly kind: "column-break" };
@@ -58,6 +65,17 @@ function parseBookAttrs(raw: string): { size: string | undefined; theme: string 
     if (match[1] === "theme") theme = match[2];
   }
   return { size, theme };
+}
+
+/** One attribute's value out of a captured attribute run, or `undefined` when the
+ * run does not carry it. Attributes the caller does not ask about are neither
+ * rejected nor reported here -- what an unexpected attribute means is the caller's
+ * decision, the same way `parseBookAttrs` above leaves it. */
+function attributeValue(raw: string, name: string): string | undefined {
+  for (const match of raw.matchAll(ATTR)) {
+    if (match[1] === name) return match[2];
+  }
+  return undefined;
 }
 
 /**
@@ -81,7 +99,8 @@ export function matchTagLine(line: string): TagLine | undefined {
   if (sectionOpen) return { kind: "section-open", columns: sectionOpen[1] };
   if (SECTION_CLOSE.test(trimmed)) return { kind: "section-close" };
 
-  if (PAGE_OPEN.test(trimmed)) return { kind: "page-open" };
+  const pageOpen = PAGE_OPEN.exec(trimmed);
+  if (pageOpen) return { kind: "page-open", columns: attributeValue(pageOpen[1] ?? "", "columns") };
   if (PAGE_CLOSE.test(trimmed)) return { kind: "page-close" };
 
   if (PAGE_BREAK.test(trimmed)) return { kind: "page-break" };
