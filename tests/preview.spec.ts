@@ -277,3 +277,71 @@ test.describe("print button error paths", () => {
     expect(await page.locator("#status").textContent()).toContain("Printing failed");
   });
 });
+
+const OTHER_GOOD_SOURCE = ['<Book size="A5">', '<Section columns="1">', "A second paragraph appears here.", "</Section>", "</Book>"].join(
+  "\n",
+);
+
+/**
+ * Issue #11: broken markup already left the last good preview alone (the render step
+ * throws before the pagination adapter is ever called), but the engine's own failure
+ * did not -- the adapter emptied the preview before layout started, so an author whose
+ * engine gave up was left with a blank pane and no line number to go to. The consumer
+ * is that author; the observable failure is the preview going empty when the status
+ * says the engine failed.
+ *
+ * Real Vivliostyle throughout: no document triggers its error path (an empty string,
+ * plain text, a missing stylesheet, a missing image, unclosed XHTML and a nonsense
+ * `@page size` were all tried, and it paginated every one of them), so the failure is
+ * forced where the engine reads instead. The adapter hands it a blob URL, because the
+ * book is a string built in memory rather than a resource that lives anywhere;
+ * `URL.createObjectURL` is patched to return one that resolves to nothing, so the
+ * engine's own 'error' event fires on a load it genuinely could not complete. Patching
+ * a native browser API from the test is what the burst test above already does to
+ * `Element.prototype.replaceChildren`.
+ */
+const UNLOADABLE_DOCUMENT = () => {
+  URL.createObjectURL = () => `blob:${location.origin}/a-blob-url-that-resolves-to-nothing`;
+};
+
+test.describe("a repaint the engine cannot finish", () => {
+  test("the last good book stays on screen and the status names the engine", async ({ page }) => {
+    // #given: a book the real engine has laid out into the preview
+    await page.goto(HARNESS);
+    await replaceSource(page, GOOD_SOURCE);
+    await expect.poll(() => page.locator("#preview").textContent()).toContain("A good paragraph appears here.");
+    const goodPreview = await page.locator("#preview").textContent();
+
+    // #when: the engine can no longer load what it is handed, and the author writes on
+    await page.evaluate(UNLOADABLE_DOCUMENT);
+    await replaceSource(page, OTHER_GOOD_SOURCE);
+
+    // #then: the failure is reported in pagination's own wording, and the preview is
+    // still the book the author was writing against
+    await expect(page.locator("#status")).toBeVisible();
+    await expect.poll(() => page.locator("#status").textContent()).toContain("the pagination engine could not lay out the book");
+    expect(await page.locator("#preview").textContent()).toBe(goodPreview);
+    expect(goodPreview).toContain("A good paragraph appears here.");
+  });
+
+  test("the very first repaint of a session failing leaves an empty preview, not an exception", async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+
+    // #given: an engine that cannot load a document, armed before the app's own
+    // module runs, so there is no previous good render to keep at all
+    // #when: the session's first repaint runs
+    await page.addInitScript(UNLOADABLE_DOCUMENT);
+    await page.goto(HARNESS);
+
+    // #then: the failure is reported, the preview holds nothing at all, and nothing
+    // threw. Emptiness is read as markup rather than as text because the engine
+    // leaves its own empty viewport scaffolding behind when it gives up -- divs that
+    // read as no text at all, so a preview that was never actually put back would
+    // look identical to one that was.
+    await expect(page.locator("#status")).toBeVisible();
+    await expect.poll(() => page.locator("#status").textContent()).toContain("the pagination engine could not lay out the book");
+    expect(await page.locator("#preview").innerHTML()).toBe("");
+    expect(pageErrors).toEqual([]);
+  });
+});

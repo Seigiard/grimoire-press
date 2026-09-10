@@ -48,6 +48,77 @@
         return pageCount;
       };
 
+      // Issue #11's seam: `paginate` is all-or-nothing about the container it is
+      // given, so a failed run has to be watched at the container itself.
+      //
+      // Forcing a genuine engine failure has no document-level trigger: an empty
+      // string, plain text, a missing stylesheet link, a missing `@import`, a missing
+      // image, unclosed XHTML, a nonsense `@page size` and a broken `@media` query
+      // were all tried during this ticket and Vivliostyle paginated every one of them
+      // into a page without complaint. The failure is forced one level down instead,
+      // where the engine actually reads: the adapter loads the book from a blob URL
+      // (it is a string built in memory, not a resource that lives anywhere), so
+      // handing it a blob URL that resolves to nothing makes Vivliostyle's own 'error'
+      // event fire on a load it genuinely could not complete -- the real engine, its
+      // real failure path, not a stub standing in for it. Patching a native browser
+      // API from the test is what tests/preview.spec.ts already does to
+      // `Element.prototype.replaceChildren` and tests/persistence.spec.ts to
+      // `Storage.prototype.setItem`.
+      const withUnloadableDocument = async (run) => {
+        const native = URL.createObjectURL;
+        URL.createObjectURL = () => `blob:${location.origin}/a-blob-url-that-resolves-to-nothing`;
+        try {
+          return await run();
+        } finally {
+          URL.createObjectURL = native;
+        }
+      };
+
+      // Real Vivliostyle lays a real book out into the container first, so what the
+      // failed run has to preserve is an actual paginated book rather than a stand-in
+      // the test put there itself.
+      window.__previewAfterEngineFailure = async (goodSource, nextSource) => {
+        const container = document.getElementById("preview");
+        container.replaceChildren();
+        await paginate(container, renderBook({ source: goodSource }));
+        const before = container.innerHTML;
+
+        let rejection;
+        await withUnloadableDocument(async () => {
+          try {
+            await paginate(container, renderBook({ source: nextSource }));
+          } catch (error) {
+            rejection = error.message;
+          }
+        });
+
+        // Layout the engine had already scheduled before it gave up would land after
+        // the restore, not before it, so a version that puts the book back and is
+        // then clobbered a moment later has to be given the chance to show itself.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return { rejection, before, after: container.innerHTML };
+      };
+
+      // The very first repaint of a session failing: there is no last good render to
+      // keep, so the container must simply end up empty rather than throwing over
+      // having nothing to restore.
+      window.__previewAfterFirstEverEngineFailure = async (source) => {
+        const container = document.getElementById("preview");
+        container.replaceChildren();
+
+        let rejection;
+        await withUnloadableDocument(async () => {
+          try {
+            await paginate(container, renderBook({ source }));
+          } catch (error) {
+            rejection = error.message;
+          }
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return { rejection, after: container.innerHTML };
+      };
+
       // Issue #3's seam: a book's source in, each rendered element's real on-page
       // position and page index out (keyed by the source line render-book.ts tagged
       // it with), plus the page count and each page's real rendered size. Tests read

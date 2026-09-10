@@ -149,3 +149,41 @@ test.describe("book markup", () => {
     expect(forcedX!).toBeGreaterThan(naturalX!);
   });
 });
+
+const OTHER_PROSE = "# A different cheat sheet\n\nProse the engine never manages to lay out.\n";
+
+/**
+ * Issue #11: the engine's own failure used to cost the author the last book that
+ * paginated successfully, because the adapter emptied the preview before layout
+ * started and nothing put it back. The consumer is an author whose engine gives up
+ * with no line number to go to; the observable failure is an empty preview where a
+ * book had been. The oracle is the preview's own markup, compared byte for byte
+ * against what real Vivliostyle put there on the run before -- never a claim about
+ * why the engine failed.
+ */
+test.describe("a failed pagination and the preview", () => {
+  test("an engine failure leaves the last successfully paginated book on screen", async ({ page }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    // #given: a real book, laid out by the real engine
+    // #when: the next run fails inside the engine
+    const { rejection, before, after } = await page.evaluate(
+      ({ good, next }) => window.__previewAfterEngineFailure(good, next),
+      { good: SHORT_PROSE, next: OTHER_PROSE },
+    );
+
+    // #then: the run really did fail, and the preview is exactly the book it was
+    expect(rejection).toContain("Vivliostyle failed to paginate the book");
+    expect(before).toContain("A cheat sheet");
+    expect(after).toBe(before);
+  });
+
+  test("the first repaint of a session failing leaves the preview empty rather than throwing", async ({ page }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    const { rejection, after } = await page.evaluate((source) => window.__previewAfterFirstEverEngineFailure(source), SHORT_PROSE);
+
+    expect(rejection).toContain("Vivliostyle failed to paginate the book");
+    expect(after).toBe("");
+  });
+});
