@@ -47,28 +47,7 @@
         createDebouncedPersist(),
       );
 
-      // Expose helpers for testing
       window.__editor = editor;
-      window.__clearDraft = () => {
-        try {
-          localStorage.removeItem("grimoire:draft");
-        } catch {
-          // Silently fail if localStorage is unavailable
-        }
-      };
-      window.__setEditorContent = (content) => {
-        const editorElement = document.querySelector(".cm-editor");
-        if (editorElement?.__view) {
-          const { state } = editorElement.__view;
-          editorElement.__view.dispatch({
-            changes: {
-              from: 0,
-              to: state.doc.length,
-              insert: content,
-            },
-          });
-        }
-      };
     </script>
   </body>
 </html>

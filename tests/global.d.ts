@@ -6,6 +6,6 @@ declare global {
   interface Window {
     __paginateBook: (source: string) => Promise<number>;
     __editor?: EditorHandle;
-    __clearDraft?: () => void;
+    __writeCount: number;
   }
 }

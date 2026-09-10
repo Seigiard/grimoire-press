@@ -1,89 +1,83 @@
 import { expect, test } from "@playwright/test";
 
+const HARNESS = "/tests/fixtures/persistence-harness.html";
+
 /**
- * Test oracle: The consumer is the browser application (the editor).
- * Observable failure: after reloading the page, the editor content is lost or an error is thrown.
- * Oracle: the stored value in localStorage, read directly with localStorage.getItem('grimoire:draft'),
- * which is independent of the implementation.
+ * The oracle for every test here is the browser's own storage, observed through the
+ * native `Storage` API rather than through the adapter that wrote to it. What is
+ * asserted is what an author would notice: a draft that comes back after a reload,
+ * an editor that opens on a clean machine, and a storage that is not written once
+ * per keystroke.
  */
 test.describe("persistence", () => {
   test.beforeEach(async ({ page }) => {
-    // #given: clear any existing draft before each test
-    await page.goto("/tests/fixtures/persistence-harness.html");
-    await page.evaluate(() => window.__clearDraft?.());
+    // #given: a browser with no draft stored
+    await page.goto(HARNESS);
+    await page.evaluate(() => localStorage.clear());
     await page.reload();
   });
 
-  test("draft survives page reload", async ({ page }) => {
-    // #given: the editor is open with no draft in localStorage
-    await page.goto("/tests/fixtures/persistence-harness.html");
+  test("a draft written before the tab closes comes back when it reopens", async ({ page }) => {
+    // #when: the author writes, then the tab is closed and reopened
+    await page.locator(".cm-editor").click();
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.type("\n\nThe referee rolls two dice.\n");
 
-    // #when: the user types additional content (appended to template)
-    const additionalText = "# My Custom Section\n\nCustom content here.\n";
-    const editorView = await page.locator(".cm-editor");
-    await editorView.click();
-    // Move cursor to end of document
-    await page.keyboard.press("Control+End");
-    // Type the additional content
-    await page.keyboard.type(additionalText);
+    await expect
+      .poll(() => page.evaluate(() => window.__editor?.getSource?.()))
+      .toContain("The referee rolls two dice.");
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("grimoire:draft")))
+      .toContain("The referee rolls two dice.");
 
-    // Wait for debounce to complete (1000ms + buffer)
-    await page.waitForTimeout(1200);
-
-    // Verify it was written to localStorage (should include both template and custom content)
-    const stored = await page.evaluate(() => localStorage.getItem("grimoire:draft"));
-    expect(stored).toBeDefined();
-    expect(stored).toContain("My Custom Section");
-    expect(stored).toContain("Custom content here");
-
-    // #then: reload the page
     await page.reload();
 
-    // The editor content should be restored with the custom content still present
-    const editorContent = await page.evaluate(() => window.__editor?.getSource?.());
-    expect(editorContent).toContain("My Custom Section");
-    expect(editorContent).toContain("Custom content here");
+    // #then: the reopened editor holds what the author wrote
+    const restored = await page.evaluate(() => window.__editor?.getSource?.());
+    expect(restored).toContain("The referee rolls two dice.");
   });
 
-  test("first-time visitor gets default template when no draft exists", async ({ page }) => {
-    // #given: localStorage is empty (cleared in beforeEach)
-    // (already done above)
+  test("a first-time visitor gets a usable editor rather than an error", async ({ page }) => {
+    // #given: storage holds no draft (cleared in beforeEach)
+    // #when: the editor opens
+    const source = await page.evaluate(() => window.__editor?.getSource?.());
 
-    // #when: the page loads
+    // #then: there is a book to edit, and typing into it works
+    expect(source).toBeTruthy();
 
-    // #then: the editor should contain the default template, not error
-    const editorContent = await page.evaluate(() => window.__editor?.getSource?.());
-
-    expect(editorContent).toBeDefined();
-    expect(editorContent).toContain("Untitled book");
+    await page.locator(".cm-editor").click();
+    await page.keyboard.type("x");
+    const afterTyping = await page.evaluate(() => window.__editor?.getSource?.());
+    expect(afterTyping).not.toBe(source);
   });
 
-  test("draft is written after typing stops, not on every keystroke", async ({ page }) => {
-    // #given: the editor is open and a draft is stored (from beforeEach clear and reload)
-    await page.goto("/tests/fixtures/persistence-harness.html");
+  test("a burst of typing costs far fewer writes than it has keystrokes", async ({ page }) => {
+    // #given: a counter on the native storage API, which is the browser's, not ours.
+    // Counting here rather than inside the adapter keeps the oracle independent of
+    // the code under test: a writer that ignored its debounce would still be counted.
+    await page.evaluate(() => {
+      const nativeSetItem = Storage.prototype.setItem;
+      window.__writeCount = 0;
+      Storage.prototype.setItem = function (key: string, value: string): void {
+        window.__writeCount += 1;
+        nativeSetItem.call(this, key, value);
+      };
+    });
 
-    const editorView = await page.locator(".cm-editor");
-    await editorView.click();
-    await page.keyboard.press("Control+End");
+    // #when: the author types a run of characters with no pause between them
+    const burst = "Roll under your ability score to succeed.";
+    await page.locator(".cm-editor").click();
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.type(burst, { delay: 0 });
 
-    // #when: the user types rapidly
-    await page.keyboard.type("First");
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("grimoire:draft")))
+      .toContain(burst);
 
-    // Wait while the debounce timer is running
-    await page.waitForTimeout(500);
-
-    // Type more without waiting for debounce to complete
-    await page.keyboard.type(" Second");
-    await page.waitForTimeout(200);
-
-    // At this point, debounce timer was reset by the second keystroke
-
-    // #then: after typing stops and debounce completes
-    await page.waitForTimeout(1100);
-
-    const finalStored = await page.evaluate(() => localStorage.getItem("grimoire:draft"));
-    // The final write should contain both words
-    expect(finalStored).toContain("First");
-    expect(finalStored).toContain("Second");
+    // #then: the burst reached storage in a handful of writes, not one per keystroke.
+    // The bound is deliberately loose: the point is the order of magnitude, not an
+    // exact count, which would depend on how fast the machine running this types.
+    const writes = await page.evaluate(() => window.__writeCount);
+    expect(writes).toBeLessThan(burst.length / 4);
   });
 });
