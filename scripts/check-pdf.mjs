@@ -35,6 +35,7 @@
 //
 // Usage: npm run check:pdf, then: pdffonts /tmp/check.pdf
 import { chromium } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { createServer } from "vite";
 
@@ -49,6 +50,28 @@ const PORT = 5197;
 // Two headings, forced onto separate pages by <PageBreak />, is issue #5's
 // own evidence: a running header that names one heading on the first page
 // and the other on the second is not provable from a single heading.
+//
+// Every run of this book has to reach every face the theme declares, or the
+// check silently stops guarding the ones it misses. That is what happened up
+// to issue #9: with no italic and no bold anywhere in the text, the theme's
+// italic and semibold @font-face rules never loaded, and `pdffonts` reported
+// on the two faces the book happened to use rather than on the eight the
+// theme ships. So the emphasis below is not decoration -- each run is the
+// only thing that pulls one face into the PDF:
+//
+//   plain Cyrillic prose  -> Vollkorn 400 normal (and @bottom-center)
+//   *курсив*              -> Vollkorn 400 italic
+//   **полужирный**        -> Vollkorn 600 normal
+//   ***оба сразу***       -> Vollkorn 600 italic
+//   > blockquote          -> Vollkorn 400 italic at display size
+//   # Заголовок           -> Alegreya 600 normal (and @top-center at 400)
+//   # ... *с курсивом*    -> Alegreya 600 italic
+//
+// Alegreya 400 italic is the one shipped face this book cannot reach: the
+// theme sets Alegreya in h1..h4 (weight 600) and in @top-center (weight 400,
+// font-style normal), so nothing in its CSS can ask for Alegreya italic at
+// 400. It ships anyway, because an author writing emphasis inside a heading
+// at any other weight would otherwise land back on a synthesised oblique.
 const RUSSIAN_BOOK = [
   '<Book size="90mm 160mm" theme="default-ru">',
   '<Section columns="1">',
@@ -63,9 +86,15 @@ const RUSSIAN_BOOK = [
     "an otherwise Russian sentence, so «Read the Situation» should sit in the " +
     "very same typeface as the Cyrillic text around it.",
   "",
+  "Ход *«Прочитать обстановку»* даёт **преимущество**, а на полном успехе — " +
+    "***решающее преимущество***, которое сохраняется до конца сцены.",
+  "",
+  "> Предгрозовое затишье длилось недолго: свидетельствование о " +
+    "достопримечательностях закончилось, и переосвидетельствование началось.",
+  "",
   "<PageBreak />",
   "",
-  "# Второй раздел",
+  "# Второй раздел *и продолжение*",
   "",
   "Текст второго раздела, чтобы бегущий заголовок сменился вместе с ним.",
   "</Section>",
@@ -100,3 +129,52 @@ await browser.close();
 await server.close();
 
 console.log("Wrote /tmp/check.pdf (" + pdf.length + " bytes)");
+
+// The check that gives this script its name. Everything above only produces a
+// PDF; without this, a change that puts a variable font back in the theme
+// prints a perfectly readable book whose every glyph is a Type 3 drawing
+// procedure, and nothing notices. `pdffonts` is the oracle: the type column
+// must read CID TrueType for every face, and no face may carry a synthetic
+// axis suffix such as `_wght2580000`, which is how Chromium names an instance
+// of a file that still declares variation axes. See issue #9.
+let fontReport;
+try {
+  fontReport = execFileSync("pdffonts", ["/tmp/check.pdf"], { encoding: "utf8" });
+} catch (error) {
+  // Not a warning. This script's job is to check the PDF, and without the
+  // checker it cannot do it -- exiting 0 here would be a green run that
+  // verified nothing.
+  console.error("pdffonts is required to check the printed PDF and is not available.");
+  console.error("Install poppler (macOS: `brew install poppler`), then run this again.");
+  console.error(String(error));
+  process.exit(1);
+}
+
+console.log(fontReport.trimEnd());
+
+const faces = fontReport
+  .split("\n")
+  .slice(2)
+  .filter((line) => line.trim() !== "")
+  .map((line) => ({ name: line.slice(0, 36).trim(), type: line.slice(37, 54).trim() }));
+
+const problems = [];
+if (faces.length === 0) {
+  problems.push("the PDF embeds no typeface at all");
+}
+for (const face of faces) {
+  if (face.type !== "CID TrueType") {
+    problems.push(`${face.name} embeds as ${face.type}, not CID TrueType`);
+  }
+  if (/_wght\d/.test(face.name)) {
+    problems.push(`${face.name} carries an axis suffix, so it is still on a variable font file`);
+  }
+}
+
+if (problems.length > 0) {
+  console.error("\nThe printed PDF does not embed its typefaces as outline fonts:");
+  for (const problem of [...new Set(problems)]) console.error(`  ${problem}`);
+  process.exit(1);
+}
+
+console.log(`\nEvery face embeds as an outline font (${new Set(faces.map((f) => f.name)).size} distinct).`);
