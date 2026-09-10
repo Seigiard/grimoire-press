@@ -2,6 +2,8 @@ import { CoreViewer, type Payload } from "@vivliostyle/core";
 
 export interface PaginationResult {
   readonly pageCount: number;
+  /** Each page's rendered size in CSS pixels, driven by the book's `@page size`. */
+  readonly pageSizes: ReadonlyArray<{ readonly width: number; readonly height: number }>;
 }
 
 /**
@@ -35,8 +37,9 @@ export function paginate(container: HTMLElement, html: string): Promise<Paginati
       latestEpageCount = payload.epageCount;
     };
     const onLoaded = (payload: Payload): void => {
+      const pageSizes = viewer.getPageSizes();
       cleanup();
-      resolve({ pageCount: latestEpageCount ?? payload.epageCount });
+      resolve({ pageCount: latestEpageCount ?? payload.epageCount, pageSizes });
     };
     const onError = (payload: Payload): void => {
       cleanup();

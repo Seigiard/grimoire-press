@@ -19,6 +19,32 @@
         const { pageCount } = await paginate(container, html);
         return pageCount;
       };
+
+      // Issue #3's seam: a book's source in, each rendered element's real on-page
+      // position out (keyed by the source line render-book.ts tagged it with), plus
+      // the page count and each page's real rendered size. Tests read these to
+      // assert column placement and forced breaks through actual Vivliostyle layout,
+      // never by inspecting Vivliostyle's own DOM structure or asserting on markup.
+      window.__paginateAndInspect = async (source) => {
+        const html = renderBook({ source });
+        const container = document.getElementById("preview");
+        const { pageCount, pageSizes } = await paginate(container, html);
+
+        // Vivliostyle pre-renders every page's content into the container, hiding
+        // the pages not currently shown; those hidden copies report empty client
+        // rects, so this keeps only the one visible occurrence of each source line.
+        const positions = {};
+        for (const el of container.querySelectorAll("[data-line]")) {
+          const rects = el.getClientRects();
+          if (rects.length === 0) continue;
+          const line = el.getAttribute("data-line");
+          if (!(line in positions)) {
+            positions[line] = { x: rects[0].x, y: rects[0].y };
+          }
+        }
+
+        return { pageCount, pageSizes, positions };
+      };
     </script>
   </body>
 </html>

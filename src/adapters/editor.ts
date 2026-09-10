@@ -4,6 +4,8 @@ import { markdown } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 
+import { bookMarkupSyntax } from "./markup-syntax";
+
 export interface EditorHandle {
   getSource(): string;
   destroy(): void;
@@ -29,7 +31,7 @@ export function createEditor(
       extensions: [
         history(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
-        markdown(),
+        markdown({ extensions: [bookMarkupSyntax] }),
         syntaxHighlighting(defaultHighlightStyle),
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
