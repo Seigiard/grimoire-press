@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MarkupError } from "../../src/core/markup-error";
+import { MarkupError, UnknownTagError } from "../../src/core/markup-error";
 import { parseBook } from "../../src/core/parse-book";
 import { getTheme } from "../../src/core/themes/registry";
 
@@ -155,5 +155,35 @@ describe("parseBook theme resolution", () => {
 
     expect(parsed.theme).toBeUndefined();
     expect(parsed.lang).toBe("en");
+  });
+});
+
+/**
+ * Issue #6's second error case: a tag nobody recognises, reported as such rather
+ * than silently swallowed as prose. The consumer is an author who mistypes a tag
+ * name (e.g. `<PageBreak />` as `<PageBrek />`); the observable failure is
+ * `parseBook` either not throwing at all (today's silent-prose behaviour) or
+ * throwing the wrong error class, leaving an author with no idea their tag did
+ * nothing. The oracle is the fixture's own line count, same as the suite above.
+ */
+describe("parseBook unknown-tag detection", () => {
+  it("names the tag and line of a tag-shaped line nobody recognises", () => {
+    const source = ["Some prose.", "", "<PageBrek />", "", "More prose."].join("\n");
+    try {
+      parseBook(source);
+      expect.unreachable("parseBook was expected to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnknownTagError);
+      expect((error as UnknownTagError).tag).toBe("PageBrek");
+      expect((error as UnknownTagError).line).toBe(3);
+    }
+  });
+
+  it("does not misreport a known tag carrying an attribute it doesn't expect", () => {
+    // A real tag name used oddly must not be reported as a made-up one -- it falls
+    // through to whatever generic markup error its shape produces, unchanged from
+    // before unknown-tag detection existed.
+    const source = ['<Book foo="bar">', '<Section columns="1">', "Some prose.", "</Section>", "</Book>"].join("\n");
+    expect(() => parseBook(source)).not.toThrow(UnknownTagError);
   });
 });
