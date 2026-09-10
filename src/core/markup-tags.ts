@@ -11,7 +11,12 @@
  * recognised as a tag; the tag-in-prose case is out of scope for this version.
  */
 
-const BOOK_OPEN = /^<Book(?:\s+size="([^"]*)")?\s*>$/;
+// `<Book>`'s attributes can appear in either order (`size` before `theme` or
+// after), so this captures the whole raw attribute run rather than one fixed
+// slot per attribute; ATTR below then pulls out whichever of size/theme is
+// present. Section still has only one attribute, so it keeps its own slot.
+const BOOK_OPEN = /^<Book((?:\s+[A-Za-z]+="[^"]*")*)\s*>$/;
+const ATTR = /([A-Za-z]+)="([^"]*)"/g;
 const BOOK_CLOSE = /^<\/Book>$/;
 const SECTION_OPEN = /^<Section(?:\s+columns="([^"]*)")?\s*>$/;
 const SECTION_CLOSE = /^<\/Section>$/;
@@ -21,12 +26,26 @@ const INDENTED = /^(?: {4}|\t)/;
 const FENCE = /^(`{3,}|~{3,})/;
 
 export type TagLine =
-  | { readonly kind: "book-open"; readonly size: string | undefined }
+  | { readonly kind: "book-open"; readonly size: string | undefined; readonly theme: string | undefined }
   | { readonly kind: "book-close" }
   | { readonly kind: "section-open"; readonly columns: string | undefined }
   | { readonly kind: "section-close" }
   | { readonly kind: "page-break" }
   | { readonly kind: "column-break" };
+
+/** Pulls `key="value"` pairs out of `<Book>`'s captured attribute run. An
+ * attribute named anything other than `size` or `theme` is silently ignored
+ * rather than rejected -- there is no third `<Book>` attribute yet, and
+ * rejecting unknown ones is a decision for whoever adds one. */
+function parseBookAttrs(raw: string): { size: string | undefined; theme: string | undefined } {
+  let size: string | undefined;
+  let theme: string | undefined;
+  for (const match of raw.matchAll(ATTR)) {
+    if (match[1] === "size") size = match[2];
+    if (match[1] === "theme") theme = match[2];
+  }
+  return { size, theme };
+}
 
 /**
  * A raw (untrimmed) line indented four spaces or more, or starting with a tab, is
@@ -42,7 +61,7 @@ export function matchTagLine(line: string): TagLine | undefined {
   const trimmed = line.trim();
 
   const bookOpen = BOOK_OPEN.exec(trimmed);
-  if (bookOpen) return { kind: "book-open", size: bookOpen[1] };
+  if (bookOpen) return { kind: "book-open", ...parseBookAttrs(bookOpen[1] ?? "") };
   if (BOOK_CLOSE.test(trimmed)) return { kind: "book-close" };
 
   const sectionOpen = SECTION_OPEN.exec(trimmed);

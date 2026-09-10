@@ -1,6 +1,13 @@
 import { DEFAULT_PAGE_SIZE } from "./book";
 import { MarkupError } from "./markup-error";
 import { describeTag, fencedCodeLines, matchTagLine, TagLine } from "./markup-tags";
+import { getTheme } from "./themes/registry";
+import type { Theme } from "./themes/theme";
+
+/** A book with no theme, or with a theme this registry does not carry
+ * "default-ru", renders in this language -- see `themes/theme.ts` for why
+ * a book cannot yet declare its own. */
+const FALLBACK_LANG = "en";
 
 /** A run of Markdown prose, and the 1-based source line it starts on. */
 export interface ProseBlock {
@@ -32,6 +39,13 @@ export interface Section {
 
 export interface ParsedBook {
   readonly size: string;
+  /** `undefined` when the book names no theme -- render-book.ts then falls
+   * back to its own plain styling, unchanged from before this theme existed. */
+  readonly theme: Theme | undefined;
+  /** Always resolved: the theme's own `lang` when one is selected, `en`
+   * otherwise. Drives `render-book.ts`'s `<html lang>` and, through it,
+   * which `hyphens: auto` rule applies. */
+  readonly lang: string;
   readonly sections: readonly Section[];
 }
 
@@ -78,7 +92,12 @@ export function parseBook(source: string): ParsedBook {
   }
 
   if (bookOpen === undefined) {
-    return { size: DEFAULT_PAGE_SIZE, sections: parseBookBody(doc, 0, lines.length) };
+    return {
+      size: DEFAULT_PAGE_SIZE,
+      theme: undefined,
+      lang: FALLBACK_LANG,
+      sections: parseBookBody(doc, 0, lines.length),
+    };
   }
 
   assertOnlyBlank(doc, 0, bookOpenIndex, "before <Book>");
@@ -86,10 +105,27 @@ export function parseBook(source: string): ParsedBook {
   const bookCloseIndex = findMatchingClose(doc, bookOpenIndex + 1, lines.length, "book-open", "book-close", "Book");
   assertOnlyBlank(doc, bookCloseIndex + 1, lines.length, "after </Book>");
 
+  const theme = resolveTheme(bookOpen.theme, bookOpenIndex);
+
   return {
     size: resolveSize(bookOpen.size, bookOpenIndex),
+    theme,
+    lang: theme?.lang ?? FALLBACK_LANG,
     sections: parseBookBody(doc, bookOpenIndex + 1, bookCloseIndex),
   };
+}
+
+/** `undefined` when `<Book>` names no theme at all -- a plain `<Book size="A5">`
+ * (or bare prose with no `<Book>` wrapper) is still a complete, valid book,
+ * rendered in render-book.ts's own fallback styling. A named theme this
+ * registry does not carry is an author's mistake, not a silent fallback. */
+function resolveTheme(theme: string | undefined, tagLine: number): Theme | undefined {
+  if (theme === undefined) return undefined;
+  const resolved = getTheme(theme);
+  if (resolved === undefined) {
+    throw new MarkupError(`<Book theme="${theme}"> on line ${tagLine + 1} names an unknown theme`, tagLine + 1);
+  }
+  return resolved;
 }
 
 function resolveSize(size: string | undefined, tagLine: number): string {

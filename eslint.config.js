@@ -4,7 +4,10 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "node_modules/**", "playwright-report/**", "test-results/**"],
+    // scripts/ holds standalone Node tools run directly with `node`, never
+    // imported by the app or bundled by Vite, so the app-focused rules here
+    // (the DOM-global ban, the boundaries rule) have no business policing them.
+    ignores: ["dist/**", "node_modules/**", "playwright-report/**", "test-results/**", "scripts/**"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

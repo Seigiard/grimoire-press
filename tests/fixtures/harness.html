@@ -60,6 +60,31 @@
 
         return { pageCount, pageSizes, positions };
       };
+
+      // Issue #4's seam: a book's source in, real computed `font-family` values
+      // out, keyed by CSS selector. Loaded into an iframe (not the pagination
+      // container above) because font resolution and cascade order are a plain
+      // CSS/DOM concern, independent of Vivliostyle -- the iframe just needs a
+      // real browser to parse render-book.ts's exact `<style>` output and
+      // resolve the cascade, which is the actual thing under test.
+      window.__inspectFonts = async (source, selectors) => {
+        const html = renderBook({ source });
+        const iframe = document.createElement("iframe");
+        iframe.style.display = "none";
+        document.body.appendChild(iframe);
+        await new Promise((resolve) => {
+          iframe.onload = resolve;
+          iframe.srcdoc = html;
+        });
+        const doc = iframe.contentDocument;
+        const result = {};
+        for (const selector of selectors) {
+          const el = doc.querySelector(selector);
+          result[selector] = el ? iframe.contentWindow.getComputedStyle(el).fontFamily : undefined;
+        }
+        iframe.remove();
+        return result;
+      };
     </script>
   </body>
 </html>
