@@ -178,6 +178,24 @@ test.describe("a failed pagination and the preview", () => {
     expect(after).toBe(before);
   });
 
+  test("an engine failure leaves no bookkeeping of its own on the preview container", async ({ page }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    // #given: a real book, laid out by the real engine
+    // #when: the next run fails inside the engine
+    const { attributesBefore, attributesAfter } = await page.evaluate(
+      ({ good, next }) => window.__previewAfterEngineFailure(good, next),
+      { good: SHORT_PROSE, next: OTHER_PROSE },
+    );
+
+    // #then: the container itself is as it was, not only its contents. The engine
+    // marks the container `data-vivliostyle-viewer-status="loading"` when it starts
+    // and never marks it back on the way out, so a restore that puts only the child
+    // nodes back leaves the container describing the run that failed.
+    expect(attributesBefore).toContain("data-vivliostyle-viewer-status=complete");
+    expect(attributesAfter).toBe(attributesBefore);
+  });
+
   test("the first repaint of a session failing leaves the preview empty rather than throwing", async ({ page }) => {
     await page.goto("/tests/fixtures/harness.html");
 

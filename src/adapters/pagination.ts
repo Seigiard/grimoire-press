@@ -31,13 +31,23 @@ export function paginate(container: HTMLElement, html: string): Promise<Paginati
     // cannot measure, and a detached container collapses every page onto one. See
     // ADR-0005.
     const lastGoodRender = Array.from(container.childNodes);
+    // The engine writes its own bookkeeping onto the container as well as into it --
+    // a viewer-status, a page progression, `--viv-*` custom properties -- and a run
+    // that fails leaves that bookkeeping describing the failed run. Nothing styles
+    // off those attributes today, so this is not a visible defect; it is the
+    // difference between the guarantee above being true and being nearly true, and a
+    // guarantee that is nearly true is the kind a later change quietly relies on.
+    const lastGoodAttributes = Array.from(container.attributes, (a) => [a.name, a.value] as const);
     // Each call creates a fresh CoreViewer rather than reloading an existing one, so
     // a stale render from the previous call must be cleared first: CoreViewer appends
     // to the viewport element, it does not replace what a prior instance left there.
     container.replaceChildren();
-    // autoResize would register a window resize listener that only a viewer.destroy()
-    // removes, and a viewer is created per call, so leaving it on leaks one listener
-    // per keystroke. The preview repaints from source instead of resizing in place.
+    // autoResize would register a window resize listener, and a viewer is created per
+    // call, so leaving it on leaks one listener per keystroke. `CoreViewer` in
+    // @vivliostyle/core 2.45.1 exposes no teardown method at all -- there is no
+    // `destroy()` to call afterwards -- so never registering the listener is the only
+    // way not to accumulate them. The preview repaints from source instead of
+    // resizing in place.
     const viewer = new CoreViewer({ viewportElement: container }, { autoResize: false });
     const blobUrl = URL.createObjectURL(new Blob([html], { type: "text/html" }));
 
@@ -62,6 +72,14 @@ export function paginate(container: HTMLElement, html: string): Promise<Paginati
       // with the empty container a first-ever failure leaves (nothing to put back is
       // an empty spread, not a special case).
       container.replaceChildren(...lastGoodRender);
+      // Attributes the engine added during the failed run go with it, and any it
+      // overwrote go back to the value they had on the way in.
+      for (const { name } of Array.from(container.attributes)) {
+        container.removeAttribute(name);
+      }
+      for (const [name, value] of lastGoodAttributes) {
+        container.setAttribute(name, value);
+      }
       reject(new Error(`Vivliostyle failed to paginate the book: ${JSON.stringify(payload.content)}`));
     };
     const cleanup = (): void => {

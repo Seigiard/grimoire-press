@@ -38,11 +38,18 @@ pagination is wrong, which is the failure that would have shipped quietly.
 
 ## The decision
 
-`paginate` remembers the container's children before it empties it, and puts them back
-when the engine's error event fires. The adapter is all-or-nothing about the container it
-is given: when the call settles, the container holds either a newly paginated book or
-exactly what it held on the way in. A first-ever failure needs no special handling — it
-restores an empty container into an empty container.
+`paginate` remembers the container's children *and its attributes* before it empties it,
+and puts both back when the engine's error event fires. The adapter is all-or-nothing
+about the container it is given: when the call settles, the container holds either a
+newly paginated book or exactly what it held on the way in. A first-ever failure needs no
+special handling — it restores an empty container into an empty container.
+
+The attributes are part of that promise and not a detail. The engine marks the container
+`data-vivliostyle-viewer-status="loading"` when it starts and never marks it back on the
+error path, so restoring only the child nodes leaves the container itself describing the
+run that failed. Nothing styles off those attributes today, which is why this is not a
+visible defect — it is the difference between the guarantee being true and being nearly
+true, and a nearly-true guarantee is the kind a later change quietly relies on.
 
 ## Consequences
 

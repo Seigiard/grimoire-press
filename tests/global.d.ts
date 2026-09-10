@@ -24,6 +24,8 @@ declare global {
     rejection: string | undefined;
     before?: string;
     after: string;
+    attributesBefore?: string;
+    attributesAfter: string;
   }
 
   interface Window {
