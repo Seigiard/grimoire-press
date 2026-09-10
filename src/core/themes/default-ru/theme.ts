@@ -1,6 +1,5 @@
 import alegreya400 from "./fonts/alegreya/Alegreya-400.woff2?inline";
 import alegreya600 from "./fonts/alegreya/Alegreya-600.woff2?inline";
-import alegreyaItalic400 from "./fonts/alegreya/Alegreya-Italic-400.woff2?inline";
 import alegreyaItalic600 from "./fonts/alegreya/Alegreya-Italic-600.woff2?inline";
 import vollkorn400 from "./fonts/vollkorn/Vollkorn-400.woff2?inline";
 import vollkorn600 from "./fonts/vollkorn/Vollkorn-600.woff2?inline";
@@ -23,8 +22,8 @@ import magickCss from "./magick.css?raw";
  * other. `?raw` does the equivalent for magick.css: its text, unmodified by
  * any bundler transform, ends up verbatim in the theme's CSS.
  *
- * Eight files, one per weight and style, rather than the two variable files
- * per family these used to be (issue #9). Both families ship upstream as
+ * Seven files, one per weight and style the theme's CSS can reach, rather than
+ * the two variable files per family these used to be (issue #9). Both families ship upstream as
  * variable fonts with a 400-900 weight axis, and Chromium's PDF backend
  * refuses to embed any typeface whose file declares variation axes: it writes
  * every glyph as a Type 3 drawing procedure instead of embedding the outline
@@ -35,6 +34,12 @@ import magickCss from "./magick.css?raw";
  * weight was then faked by synthetic emboldening. The only fix is files with
  * no axes, which is what `scripts/build-static-fonts.py` produces from the
  * variable sources kept beside them under each family's `upstream` directory.
+ *
+ * Seven and not eight because Alegreya italic at 400 is unreachable: Alegreya is
+ * set in `h1`..`h4` at weight 600 and in `@top-center` at weight 400 with
+ * `font-style: normal`, and a margin box's content comes from
+ * `string(current-heading)`, which carries no markup to make italic out of. A
+ * rule that does reach it brings its own file.
  *
  * Every weight and style the theme's own CSS can ask for needs a real file
  * here. A weight with no file is either synthesised by the browser or matched
@@ -85,13 +90,6 @@ const FONT_FACES = `
   src: url("${alegreya600}") format("woff2");
   font-weight: 600;
   font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Alegreya";
-  src: url("${alegreyaItalic400}") format("woff2");
-  font-weight: 400;
-  font-style: italic;
   font-display: swap;
 }
 @font-face {

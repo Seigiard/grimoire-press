@@ -35,6 +35,7 @@
 //
 // Usage: npm run check:pdf, then: pdffonts /tmp/check.pdf
 import { chromium } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { createServer } from "vite";
 
@@ -128,3 +129,52 @@ await browser.close();
 await server.close();
 
 console.log("Wrote /tmp/check.pdf (" + pdf.length + " bytes)");
+
+// The check that gives this script its name. Everything above only produces a
+// PDF; without this, a change that puts a variable font back in the theme
+// prints a perfectly readable book whose every glyph is a Type 3 drawing
+// procedure, and nothing notices. `pdffonts` is the oracle: the type column
+// must read CID TrueType for every face, and no face may carry a synthetic
+// axis suffix such as `_wght2580000`, which is how Chromium names an instance
+// of a file that still declares variation axes. See issue #9.
+let fontReport;
+try {
+  fontReport = execFileSync("pdffonts", ["/tmp/check.pdf"], { encoding: "utf8" });
+} catch (error) {
+  // Not a warning. This script's job is to check the PDF, and without the
+  // checker it cannot do it -- exiting 0 here would be a green run that
+  // verified nothing.
+  console.error("pdffonts is required to check the printed PDF and is not available.");
+  console.error("Install poppler (macOS: `brew install poppler`), then run this again.");
+  console.error(String(error));
+  process.exit(1);
+}
+
+console.log(fontReport.trimEnd());
+
+const faces = fontReport
+  .split("\n")
+  .slice(2)
+  .filter((line) => line.trim() !== "")
+  .map((line) => ({ name: line.slice(0, 36).trim(), type: line.slice(37, 54).trim() }));
+
+const problems = [];
+if (faces.length === 0) {
+  problems.push("the PDF embeds no typeface at all");
+}
+for (const face of faces) {
+  if (face.type !== "CID TrueType") {
+    problems.push(`${face.name} embeds as ${face.type}, not CID TrueType`);
+  }
+  if (/_wght\d/.test(face.name)) {
+    problems.push(`${face.name} carries an axis suffix, so it is still on a variable font file`);
+  }
+}
+
+if (problems.length > 0) {
+  console.error("\nThe printed PDF does not embed its typefaces as outline fonts:");
+  for (const problem of [...new Set(problems)]) console.error(`  ${problem}`);
+  process.exit(1);
+}
+
+console.log(`\nEvery face embeds as an outline font (${new Set(faces.map((f) => f.name)).size} distinct).`);

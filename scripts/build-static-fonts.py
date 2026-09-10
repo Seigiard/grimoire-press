@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["fonttools==4.65.0", "brotli>=1.1.0"]
+# dependencies = ["fonttools==4.65.0", "brotli==1.2.0"]
 # ///
 """Regenerate the theme's static font instances from its variable sources.
 
@@ -50,7 +50,6 @@ FONTS_DIR = REPO_ROOT / "src/core/themes/default-ru/fonts"
 # A weight with no file of its own is synthesised by the browser, and a
 # synthesised face gives up the original font data -- back to Type 3, or to a
 # fake oblique that does not match the real italic.
-WEIGHTS = (400, 600)
 
 # Named so the file name says which weight it carries; 600 is "SemiBold" in the
 # name records because that is what both families call it, even though Alegreya
@@ -68,11 +67,27 @@ class Source:
     italic: bool
 
 
-SOURCES = (
-    Source("Alegreya", "alegreya", "Alegreya.woff2", italic=False),
-    Source("Alegreya", "alegreya", "Alegreya-Italic.woff2", italic=True),
-    Source("Vollkorn", "vollkorn", "Vollkorn.woff2", italic=False),
-    Source("Vollkorn", "vollkorn", "Vollkorn-Italic.woff2", italic=True),
+ALEGREYA = Source("Alegreya", "alegreya", "Alegreya.woff2", italic=False)
+ALEGREYA_ITALIC = Source("Alegreya", "alegreya", "Alegreya-Italic.woff2", italic=True)
+VOLLKORN = Source("Vollkorn", "vollkorn", "Vollkorn.woff2", italic=False)
+VOLLKORN_ITALIC = Source("Vollkorn", "vollkorn", "Vollkorn-Italic.woff2", italic=True)
+
+# Every face the theme's CSS can actually ask for, listed rather than derived as
+# a source-by-weight product. The product would be eight, and one of the eight
+# is unreachable: Alegreya is set only in h1..h4 (weight 600) and in @top-center
+# (weight 400, `font-style: normal`), and a margin box's content comes from
+# `string(current-heading)`, which carries no markup to make italic out of. So
+# nothing can request Alegreya italic at 400, and shipping it would put ~44 kB
+# in every document for a face no book can reach. A future rule that does reach
+# it brings its own line here.
+INSTANCES = (
+    (ALEGREYA, 400),
+    (ALEGREYA, 600),
+    (ALEGREYA_ITALIC, 600),
+    (VOLLKORN, 400),
+    (VOLLKORN, 600),
+    (VOLLKORN_ITALIC, 400),
+    (VOLLKORN_ITALIC, 600),
 )
 
 # Google Fonts' own `latin`, `latin-ext`, `cyrillic` and `cyrillic-ext` subsets,
@@ -199,9 +214,8 @@ def build(source: Source, weight: int) -> Path:
 
 def main() -> None:
     total = 0
-    for source in SOURCES:
-        for weight in WEIGHTS:
-            total += build(source, weight).stat().st_size
+    for source, weight in INSTANCES:
+        total += build(source, weight).stat().st_size
     print(f"total {total} bytes")
 
 
