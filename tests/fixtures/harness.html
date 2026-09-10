@@ -89,6 +89,35 @@
         return { pageCount, pageSizes, positions };
       };
 
+      // Issue #5's seam: a book's source in, each real page's running-header
+      // text and page-number text out, read from the actual margin-box
+      // elements Vivliostyle renders per page (`data-vivliostyle-page-margin-box`,
+      // an internal attribute, not public API, but the only way to read what a
+      // margin box actually resolved to without reimplementing Vivliostyle's own
+      // string-set/counter resolution). Unlike the `[data-line]` content nodes
+      // `__paginateAndInspect` reads, Vivliostyle gives each page exactly one
+      // `[data-vivliostyle-page-index]` ancestor, so no de-duplication is needed
+      // here.
+      window.__paginateAndInspectHeaders = async (source) => {
+        const html = renderBook({ source });
+        const container = document.getElementById("preview");
+        await paginate(container, html);
+
+        const pages = [];
+        for (const pageEl of container.querySelectorAll("[data-vivliostyle-page-index]")) {
+          const pageIndex = Number(pageEl.getAttribute("data-vivliostyle-page-index"));
+          const header = pageEl.querySelector('[data-vivliostyle-page-margin-box="top-center"]');
+          const pageNumber = pageEl.querySelector('[data-vivliostyle-page-margin-box="bottom-center"]');
+          pages.push({
+            pageIndex,
+            header: header ? header.textContent.trim() : undefined,
+            pageNumber: pageNumber ? pageNumber.textContent.trim() : undefined,
+          });
+        }
+        pages.sort((a, b) => a.pageIndex - b.pageIndex);
+        return pages;
+      };
+
       // Issue #4's seam: a book's source in, real computed `font-family` values
       // out, keyed by CSS selector. Loaded into an iframe (not the pagination
       // container above) because font resolution and cascade order are a plain
