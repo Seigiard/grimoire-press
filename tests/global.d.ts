@@ -37,6 +37,17 @@ declare global {
     __inspectMarginBoxFonts: (source: string) => Promise<MarginBoxFontInspection>;
     __inspectFonts: (source: string, selectors: readonly string[]) => Promise<Record<string, string | undefined>>;
     __printTwiceSharesOneAttempt: (source: string) => boolean;
+    /** tests/fixtures/timeout-harness.html: the clock the two engine deadlines are
+     * held on, and the withheld engine runs they are measured against. */
+    __advanceEngineClock: (ms: number) => void;
+    __pendingEngineDeadlines: () => number;
+    __stallEngine: () => void;
+    __unstallEngine: () => void;
+    __stalledEngineRuns: () => number;
+    __resumeOldestStalledEngineRun: () => boolean;
+    __failOldestStalledEngineRun: () => boolean;
+    __printAttemptsStarted: () => number;
+    __printDialoguesOpened: () => number;
     __printSequentiallyStartsFreshAttempts: (source: string) => Promise<boolean>;
     __editor?: EditorHandle;
     __writeCount: number;

@@ -51,6 +51,41 @@ run that failed. Nothing styles off those attributes today, which is why this is
 visible defect — it is the difference between the guarantee being true and being nearly
 true, and a nearly-true guarantee is the kind a later change quietly relies on.
 
+## What the guarantee covers, after issue #10
+
+Issue #10 bound a pagination call at 30 seconds, and a bound is another way for the call
+to settle, so the restore runs there too. That exposed the limit of the wording above.
+
+A run that fails has finished. A run that is given up on has not: the engine cannot be
+called off — `CoreViewer` in @vivliostyle/core 2.45.1 exposes no teardown method at all —
+so it is still working when the restore happens. `removeListener` detaches the adapter's
+handlers from the viewer's event target, but the object that writes to the container is
+the viewer's internal one, and nothing detaches that.
+
+Measured, driving a real book to a real timeout mid-layout and letting the abandoned run
+run on:
+
+| what the abandoned run writes | reaches the preview? |
+| --- | --- |
+| its pages | no — 37 pages laid out, none of them in the document |
+| `data-vivliostyle-viewer-status`, `data-vivliostyle-page-progression` | yes, ~200ms after the restore |
+
+The pages are kept out by this decision itself, not by anything issue #10 added. The
+restore takes the engine's own viewport subtree out of the document along with the rest
+of the children, and a detached element has no geometry to lay out against — the same
+measurement this ADR is built on, arriving as a defence instead of a defect. The run
+halts where it stands, writing into a subtree nobody can see.
+
+The attributes are not kept out, because the engine writes those straight onto the
+container it was handed. So the guarantee holds for children, and for attributes it holds
+only against this adapter's own handlers, not against the engine. Nothing styles off
+those attributes today, so this is residue rather than a visible defect — but it is the
+"nearly true" the section above warns about, and it is now nearly true for a second
+reason.
+
+A staging container is what actually closes it, since the engine would then be writing
+into an element the preview never shows. That is issue #15.
+
 ## Consequences
 
 The failure case is fixed and the flash is not. A slow repaint still blanks the preview

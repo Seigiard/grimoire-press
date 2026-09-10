@@ -1,28 +1,36 @@
+import { EngineTimeoutError } from "../adapters/engine-timeout";
 import { UnreadableBookFileError } from "../adapters/file";
 import { MarkupError, UnknownTagError } from "../core/markup-error";
 
 /**
- * The preview's whole error surface (issues #6 and #8): four closed cases the
+ * The preview's whole error surface (issues #6, #8 and #10): five closed cases the
  * application must decide what to tell the author about. A discriminated union
  * rather than an error-handling library (ADR-0004) -- adding a case here makes
  * every switch over `.kind` fail to compile until it is handled, which is what
  * "matched exhaustively" buys. `unreadable-file` is issue #1's third named error
  * case, "a file that cannot be read as a book" -- it belongs in this union, not a
  * separate type, so loading a file is reported through the same closed surface as
- * every other thing that can go wrong on the way to a repaint.
+ * every other thing that can go wrong on the way to a repaint. `engine-timeout` is
+ * its own case rather than another `pagination-failure` because the two are
+ * different events to the author: an engine that refuses a book is answering about
+ * the markup they just wrote, and an engine that does not answer at all says
+ * nothing about the markup -- the first is resolved by editing, the second by
+ * reloading.
  */
 export type PreviewError =
   | { readonly kind: "markup-error"; readonly message: string; readonly line: number }
   | { readonly kind: "unknown-tag"; readonly tag: string; readonly line: number }
   | { readonly kind: "pagination-failure"; readonly message: string }
-  | { readonly kind: "unreadable-file"; readonly message: string };
+  | { readonly kind: "unreadable-file"; readonly message: string }
+  | { readonly kind: "engine-timeout"; readonly seconds: number };
 
 /**
  * Classifies whatever `renderBook` threw, the pagination adapter rejected with, or
  * `loadBookFile` rejected with, into the closed set above. `renderBook` is the
  * only source of the first two cases; `loadBookFile` is the only source of the
- * fourth; anything else reaching a repaint's failure path is the pagination
- * engine, the only other thing that can fail a repaint.
+ * fourth; the pagination and printing adapters are the only sources of the fifth;
+ * anything else reaching a repaint's failure path is the pagination engine, the
+ * only other thing that can fail a repaint.
  */
 export function toPreviewError(error: unknown): PreviewError {
   if (error instanceof UnknownTagError) {
@@ -33,6 +41,9 @@ export function toPreviewError(error: unknown): PreviewError {
   }
   if (error instanceof UnreadableBookFileError) {
     return { kind: "unreadable-file", message: error.message };
+  }
+  if (error instanceof EngineTimeoutError) {
+    return { kind: "engine-timeout", seconds: error.seconds };
   }
   return { kind: "pagination-failure", message: error instanceof Error ? error.message : String(error) };
 }
@@ -53,6 +64,8 @@ export function describePreviewError(error: PreviewError): string {
       return `the pagination engine could not lay out the book: ${error.message}`;
     case "unreadable-file":
       return error.message;
+    case "engine-timeout":
+      return `the pagination engine did not answer within ${error.seconds} seconds; reload the editor to try again`;
     default: {
       const exhaustive: never = error;
       throw new Error(`unhandled preview error kind: ${JSON.stringify(exhaustive)}`);
@@ -73,7 +86,10 @@ export function describePreviewError(error: PreviewError): string {
  * `describePreviewError`'s pagination-specific text. `unreadable-file` can never
  * actually reach this function -- printing has no file to load -- but the
  * branch is required for the same reason the others are: the union is closed,
- * and every switch over it is checked exhaustively.
+ * and every switch over it is checked exhaustively. `engine-timeout` is worded
+ * here too rather than shared: a print that goes unanswered is not the preview
+ * going stale, and the author gave up a minute of standing by for it, so it says
+ * so in printing's own terms.
  */
 export function describePrintError(error: PreviewError): string {
   switch (error.kind) {
@@ -85,6 +101,8 @@ export function describePrintError(error: PreviewError): string {
       return error.message;
     case "unreadable-file":
       return error.message;
+    case "engine-timeout":
+      return `the print engine did not answer within ${error.seconds} seconds; reload the editor and print again`;
     default: {
       const exhaustive: never = error;
       throw new Error(`unhandled preview error kind: ${JSON.stringify(exhaustive)}`);
