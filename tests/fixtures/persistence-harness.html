@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>persistence test harness</title>
+    <link rel="stylesheet" href="/src/app/app.css" />
+    <style>
+      body {
+        margin: 0;
+        display: flex;
+      }
+      #editor {
+        flex: 1;
+        overflow: auto;
+      }
+      #preview {
+        flex: 1;
+        overflow: auto;
+        border-left: 1px solid #ccc;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="editor"></div>
+    <div id="preview"></div>
+    <button id="print"></button>
+    <script type="module">
+      import { startApp } from "/src/app/start-app.ts";
+      import { createEditor } from "/src/adapters/editor.ts";
+      import { paginate } from "/src/adapters/pagination.ts";
+      import { printBook } from "/src/adapters/printing.ts";
+      import { readDraft, createDebouncedPersist } from "/src/adapters/persistence.ts";
+
+      // Initialize the app with persistence
+      const editorContainer = document.getElementById("editor");
+      const previewContainer = document.getElementById("preview");
+      const printControl = document.getElementById("print");
+
+      const editor = startApp(
+        editorContainer,
+        previewContainer,
+        printControl,
+        createEditor,
+        paginate,
+        printBook,
+        readDraft,
+        createDebouncedPersist(),
+      );
+
+      // Expose helpers for testing
+      window.__editor = editor;
+      window.__clearDraft = () => {
+        try {
+          localStorage.removeItem("grimoire:draft");
+        } catch {
+          // Silently fail if localStorage is unavailable
+        }
+      };
+      window.__setEditorContent = (content) => {
+        const editorElement = document.querySelector(".cm-editor");
+        if (editorElement?.__view) {
+          const { state } = editorElement.__view;
+          editorElement.__view.dispatch({
+            changes: {
+              from: 0,
+              to: state.doc.length,
+              insert: content,
+            },
+          });
+        }
+      };
+    </script>
+  </body>
+</html>
