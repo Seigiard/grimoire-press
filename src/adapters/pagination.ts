@@ -13,9 +13,24 @@ export interface PaginationResult {
  *
  * Loads the document from a blob URL rather than a served path: the document is a
  * string the app just built in memory, not a resource that lives at a URL.
+ *
+ * All-or-nothing about `container` (issue #11): when it settles, the container either
+ * holds a newly paginated book or exactly what it held on the way in -- never the
+ * empty space that a failed run used to leave behind.
  */
 export function paginate(container: HTMLElement, html: string): Promise<PaginationResult> {
   return new Promise((resolve, reject) => {
+    // The last book that paginated successfully, held onto across the emptying below
+    // so a failed run can put it back. An engine failure hands the author no line
+    // number to go to, unlike a markup error, so the render they were writing against
+    // is the only thing left that tells them where they are.
+    //
+    // Laying the next book out in a detached staging container and swapping it in on
+    // success would keep the preview intact without any of this, and would remove the
+    // empty flash of a slow repaint too -- but the engine cannot fragment a book it
+    // cannot measure, and a detached container collapses every page onto one. See
+    // ADR-0005.
+    const lastGoodRender = Array.from(container.childNodes);
     // Each call creates a fresh CoreViewer rather than reloading an existing one, so
     // a stale render from the previous call must be cleared first: CoreViewer appends
     // to the viewport element, it does not replace what a prior instance left there.
@@ -43,6 +58,10 @@ export function paginate(container: HTMLElement, html: string): Promise<Paginati
     };
     const onError = (payload: Payload): void => {
       cleanup();
+      // Discards whatever the engine had already laid out before it gave up, along
+      // with the empty container a first-ever failure leaves (nothing to put back is
+      // an empty spread, not a special case).
+      container.replaceChildren(...lastGoodRender);
       reject(new Error(`Vivliostyle failed to paginate the book: ${JSON.stringify(payload.content)}`));
     };
     const cleanup = (): void => {
