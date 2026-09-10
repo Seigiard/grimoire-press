@@ -6,7 +6,8 @@ engine.
 
 The obvious one is a block element sized to the page area with `position: relative`, given
 `break-before: page` and `break-after: page`. The other is CSS Paged Media's own named
-pages: a `@page <name>` rule, and `page: <name>` on the element.
+pages: `page: <name>` on the element, and a `@page <name>` rule for whatever that named
+page declares of its own.
 
 We take the named page. This ADR records the measurements, because both routes work well
 enough in a first test that the difference only shows under pressure.
@@ -31,6 +32,13 @@ None of that had to be built. The hand-rolled canvas gets none of it: it needs t
 size restated in CSS, its own break declarations, and it cannot carry a size, a margin or
 a margin box of its own at all.
 
+Every line above was measured with a `@page <name>` rule declared, because each of those
+behaviours is something that rule asks for. The break on both sides is the exception: it
+comes from the used page name changing, so `page: <name>` on the element produces it
+alone, and an empty rule beside it changes nothing. The renderer therefore emits the rule
+only once a page has something of its own to declare -- an orientation, a suppressed
+running header -- and emits the name always.
+
 ## The trap that decided it
 
 A canvas sized to the page area fragments when a child's top margin collapses through its
@@ -50,7 +58,7 @@ produced two pages, both carrying the named page's own margin box. So "exactly o
 remains ours to check, by counting the pages the content occupied, exactly as decided
 before this measurement.
 
-It gives us the frame of reference for free, and this record was wrong about how.
+## The frame of reference comes free, and this record was wrong about how
 
 We wrote here that the renderer would emit a `position: relative` wrapper to make
 `top`/`left` inside a page mean what the author expects. Measured while building the

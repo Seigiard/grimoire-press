@@ -163,23 +163,35 @@ test.describe("a page is the frame of reference for what an author places on it"
 
     // #then: each box sits where it was declared, measured from the top-left of the
     // page's own area, on the sheet the chapter's own pages stop short of -- and
-    // the one anchored to the foot of the page is at the foot of the page, not
-    // twenty millimetres under the top of the sheet's contents
+    // the one anchored to the foot of the page is twenty millimetres above that
+    // foot, not merely somewhere below the box above it
     const origin = box(chapterAlone, "line-2");
     const declared = (key: string): Record<string, number> => ({
       x: round(box(measured, key).x - origin.x),
       y: round(box(measured, key).y - origin.y),
     });
+    // The page area's foot, in the sheet's own coordinates. The book is margined
+    // evenly, so the area ends one top margin short of the sheet, and the top
+    // margin is what `origin.y` measured. Anchoring to the foot cannot be checked
+    // against another absolutely positioned box: both would resolve against the
+    // same containing block and would move together if that block were wrong.
+    // Rounded to the whole pixel rather than the tenth the offsets above use: this
+    // one is derived from three separate measurements, so it accumulates their
+    // sub-pixel error. A wrapper that took the frame of reference away misses by
+    // hundreds of pixels, not by one.
+    const playbook = box(measured, "probe-playbook");
+    const areaFoot = playbook.pageHeight - origin.y;
+    const toWholePixel = (value: number): number => Math.round(value);
     expect({
       sheet: box(measured, "probe-strength").pageIndex,
       strength: declared("probe-strength"),
       wounds: declared("probe-wounds"),
-      playbookSitsBelowWounds: box(measured, "probe-playbook").y > box(measured, "probe-wounds").y,
+      playbookAboveTheFoot: toWholePixel(areaFoot - (playbook.y + playbook.height)),
     }).toEqual({
       sheet: chapterAlone.pageCount,
       strength: { x: round(mm(20)), y: round(mm(40)) },
       wounds: { x: round(mm(50)), y: round(mm(100)) },
-      playbookSitsBelowWounds: true,
+      playbookAboveTheFoot: toWholePixel(mm(20)),
     });
   });
 });

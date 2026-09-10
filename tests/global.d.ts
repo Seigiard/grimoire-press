@@ -9,12 +9,16 @@ declare global {
     positions: Record<string, { x?: number; y?: number; pageIndex: number | null }>;
   }
 
-  /** One element's position on the page it landed on: the page's own index, and
-   * the element's offset from that page's top-left corner in CSS pixels. */
+  /** One element's position on the page it landed on: the page's own index, the
+   * element's offset from that page's top-left corner in CSS pixels, its own
+   * height, and the height of the whole sheet it landed on. The last two are what
+   * make a box anchored to the foot of the page measurable. */
   interface PageBox {
     pageIndex: number;
     x: number;
     y: number;
+    height: number;
+    pageHeight: number;
   }
 
   interface PageMeasurement {

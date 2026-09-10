@@ -285,6 +285,10 @@
             pageIndex: Number(pageEl.getAttribute("data-vivliostyle-page-index")),
             x: rects[0].x - page.x,
             y: rects[0].y - page.y,
+            height: rects[0].height,
+            // The whole sheet, margins included. A box anchored to the foot of the
+            // page area is only measurable against this.
+            pageHeight: page.height,
           };
         };
         for (const el of container.querySelectorAll("[data-line]")) record(`line-${el.getAttribute("data-line")}`, el);
