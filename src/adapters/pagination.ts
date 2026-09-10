@@ -1,5 +1,14 @@
 import { CoreViewer, type Payload } from "@vivliostyle/core";
 
+import { EngineTimeoutError } from "./engine-timeout";
+
+// How long one pagination call may go unanswered before it is given up on
+// (issue #10). Deliberately generous: the failure being bounded here is a
+// permanent one, so any finite bound fixes it, while a bound short enough to cut
+// off a genuinely large book mid-layout would turn a book that merely takes a
+// while into a book that can never be previewed at all.
+const PAGINATION_TIMEOUT_SECONDS = 30;
+
 export interface PaginationResult {
   readonly pageCount: number;
   /** Each page's rendered size in CSS pixels, driven by the book's `@page size`. */
@@ -16,7 +25,16 @@ export interface PaginationResult {
  *
  * All-or-nothing about `container` (issue #11): when it settles, the container either
  * holds a newly paginated book or exactly what it held on the way in -- never the
- * empty space that a failed run used to leave behind.
+ * empty space that a failed run used to leave behind. A timeout is a way of settling,
+ * so it restores the container exactly as an engine failure does; anything less would
+ * reintroduce the blank preview issue #11 closed, by a different door.
+ *
+ * Rejects if the engine has not answered within `PAGINATION_TIMEOUT_SECONDS`, so the
+ * caller's own guards are released and the next edit starts a fresh attempt (issue
+ * #10). The engine's work cannot be called off, so that run stays alive and may still
+ * answer afterwards: everything this call registered is torn down at the moment it
+ * gives up, which is what keeps the late answer from putting a stale book back over
+ * whatever the preview has moved on to.
  */
 export function paginate(container: HTMLElement, html: string): Promise<PaginationResult> {
   return new Promise((resolve, reject) => {
@@ -68,26 +86,40 @@ export function paginate(container: HTMLElement, html: string): Promise<Paginati
     };
     const onError = (payload: Payload): void => {
       cleanup();
-      // Discards whatever the engine had already laid out before it gave up, along
-      // with the empty container a first-ever failure leaves (nothing to put back is
-      // an empty spread, not a special case).
+      restoreLastGoodRender();
+      reject(new Error(`Vivliostyle failed to paginate the book: ${JSON.stringify(payload.content)}`));
+    };
+    // Discards whatever the engine had already laid out before it gave up, along
+    // with the empty container a first-ever failure leaves (nothing to put back is
+    // an empty spread, not a special case). Attributes the engine added during the
+    // abandoned run go with it, and any it overwrote go back to the value they had
+    // on the way in.
+    const restoreLastGoodRender = (): void => {
       container.replaceChildren(...lastGoodRender);
-      // Attributes the engine added during the failed run go with it, and any it
-      // overwrote go back to the value they had on the way in.
       for (const { name } of Array.from(container.attributes)) {
         container.removeAttribute(name);
       }
       for (const [name, value] of lastGoodAttributes) {
         container.setAttribute(name, value);
       }
-      reject(new Error(`Vivliostyle failed to paginate the book: ${JSON.stringify(payload.content)}`));
     };
+    // Undoes everything this call registered, so that a run given up on cannot
+    // reach back into a container the preview has since moved on with: the engine
+    // is still working -- there is no way to stop it -- and its 'loaded' or 'error'
+    // may still arrive for a book nobody is waiting for any more.
     const cleanup = (): void => {
+      clearTimeout(timeoutId);
       URL.revokeObjectURL(blobUrl);
       viewer.removeListener("nav", onNav);
       viewer.removeListener("loaded", onLoaded);
       viewer.removeListener("error", onError);
     };
+
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      restoreLastGoodRender();
+      reject(new EngineTimeoutError(PAGINATION_TIMEOUT_SECONDS));
+    }, PAGINATION_TIMEOUT_SECONDS * 1000);
 
     viewer.addListener("nav", onNav);
     viewer.addListener("loaded", onLoaded);
