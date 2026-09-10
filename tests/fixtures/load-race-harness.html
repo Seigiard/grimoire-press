@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>preview coalescing test harness</title>
+    <title>load-race test harness</title>
   </head>
   <body>
     <div id="editor"></div>
@@ -16,28 +16,24 @@
     <script type="module">
       import { startApp } from "/src/app/start-app.ts";
       import { createEditor } from "/src/adapters/editor.ts";
-      import { downloadBook, loadBookFile } from "/src/adapters/file.ts";
+      import { downloadBook } from "/src/adapters/file.ts";
+      import { paginate } from "/src/adapters/pagination.ts";
       import { printBook } from "/src/adapters/printing.ts";
 
-      // A stand-in for the real pagination adapter, substituted at the exact seam
-      // issue #1's architecture designed for this (the three adapters are passed
-      // in as plain arguments). It still does real, observable DOM work -- the
-      // container's final content is what the test reads -- but its delay is
-      // deterministic instead of depending on real Vivliostyle layout timing,
-      // which is what proving issue #6's coalescing defect needs: a controllable
-      // "slow" render and a controllable "fast" one, not a hope that a big enough
-      // document reliably outlasts a keystroke on every machine this runs on.
-      const fakePaginate = (container, html) => {
-        const delay = html.includes("SLOW MARKER") ? 300 : 0;
-        return new Promise((resolve) => {
-          setTimeout(() => {
-            container.replaceChildren();
-            const div = document.createElement("div");
-            div.textContent = html;
-            container.appendChild(div);
-            resolve({ pageCount: 1, pageSizes: [] });
-          }, delay);
-        });
+      // A stand-in for the real file-load adapter, substituted at the exact seam
+      // issue #1's architecture designed for this. Its delay is keyed off the
+      // picked file's own name rather than real file-read timing, which is what
+      // proving the load-ordering defect needs: a controllable "slow" read and a
+      // controllable "fast" one, not a hope that a real slow read reliably
+      // outlasts a real fast one on every machine this suite runs on. What each
+      // file actually contains on disk is irrelevant here -- only its name
+      // selects the delay and the distinguishable source this resolves with --
+      // so the real JSON envelope this adapter would otherwise parse is never
+      // exercised by this harness at all.
+      const fakeLoadBookFile = (file) => {
+        const delay = file.name.includes("slow") ? 300 : 0;
+        const source = `# Loaded from ${file.name}\n\nContent from ${file.name}.\n`;
+        return new Promise((resolve) => setTimeout(() => resolve(source), delay));
       };
 
       const editorContainer = document.getElementById("editor");
@@ -61,11 +57,11 @@
           loadControl,
         },
         createEditor,
-        fakePaginate,
+        paginate,
         printBook,
         { read: () => undefined, write: () => {} },
         downloadBook,
-        loadBookFile,
+        fakeLoadBookFile,
       );
 
       window.__editor = editor;

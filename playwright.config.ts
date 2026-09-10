@@ -6,7 +6,10 @@ import { defineConfig } from "@playwright/test";
 // the same port. They otherwise would, and with `reuseExistingServer` a second
 // checkout silently runs its tests against the first one's server -- green or
 // red for reasons that have nothing to do with the code under test.
-const PORT = 5100 + (createHash("sha1").update(process.cwd()).digest().readUInt16BE(0) % 400);
+// 400 slots left two worktrees able to collide by chance, as silently as the bug
+// this replaced. 40,000 slots -- nearly the whole unprivileged range below
+// 65535 -- makes that collision negligible instead of merely less likely.
+const PORT = 10000 + (createHash("sha1").update(process.cwd()).digest().readUInt16BE(0) % 40000);
 
 export default defineConfig({
   testDir: "./tests",

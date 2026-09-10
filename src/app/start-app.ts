@@ -32,12 +32,28 @@ export interface AppElements {
 }
 
 /**
+ * The draft store, bundled the same way `AppElements` bundles DOM references and
+ * for the same reason: `read` and `write` are two functions that would otherwise
+ * sit as adjacent, identically-shaped parameters next to `downloadBookAdapter`
+ * below (both `(source: string) => void` -- or, for `read`, close enough that a
+ * transposition still compiles). Naming the two fields is what makes the
+ * compiler catch a swap instead of running it: an object isn't assignable where
+ * a bare function is expected, so mixing this up with `downloadBookAdapter` or
+ * `loadBookFileAdapter` fails to typecheck rather than silently downloading the
+ * draft or saving the book into local storage.
+ */
+export interface PersistenceAdapter {
+  readonly read: () => string | undefined;
+  readonly write: (source: string) => void;
+}
+
+/**
  * Wires the editor, pagination, and printing adapters to core's pure rendering. Each
  * adapter arrives as its own parameter, not a bundled options object or a container:
  * three seams, three arguments (ADR-0004).
  *
- * Persistence is delegated to an adapter function that reads and writes the draft
- * to browser storage. The adapter is responsible for debouncing writes.
+ * Persistence is delegated to a `read`/`write` adapter pair that reads and writes
+ * the draft to browser storage. `write` is responsible for debouncing.
  *
  * The preview markup is derived whenever it is needed, to repaint and to print
  * alike, rather than stored -- ADR-0004's derived-state model, amended to record
@@ -69,8 +85,7 @@ export function startApp(
   createEditorAdapter: typeof createEditor,
   paginateAdapter: typeof paginate,
   printBookAdapter: typeof printBook,
-  persistRead: () => string | undefined,
-  persistWrite: (source: string) => void,
+  persistenceAdapter: PersistenceAdapter,
   downloadBookAdapter: typeof downloadBook,
   loadBookFileAdapter: typeof loadBookFile,
 ): EditorHandle {
@@ -171,14 +186,14 @@ export function startApp(
     }, REFRESH_DEBOUNCE_MS);
   };
 
-  const initialSource = persistRead() ?? INITIAL_SOURCE;
+  const initialSource = persistenceAdapter.read() ?? INITIAL_SOURCE;
 
   // No separate copy of the source is kept: CodeMirror's own buffer is the one
   // copy, read back through `editor.getSource()` wherever the latest text is
   // needed (ADR-0004 -- nothing derivable from the editor's own state is stored
   // a second time).
   const onChange = (source: string): void => {
-    persistWrite(source);
+    persistenceAdapter.write(source);
     if (autoRefreshControl.checked) {
       scheduleRepaint(source);
     }
@@ -221,6 +236,16 @@ export function startApp(
     downloadBookAdapter(editor.getSource());
   });
 
+  // Picking a second file before the first has finished reading must never let
+  // the first's result land after the second's and overwrite it -- the same
+  // overlapping-async hazard issue #6 solved for repaints, reapplied here: each
+  // selection gets its own token, and a result is only ever applied if its token
+  // is still the most recent one requested. Unlike the repaint queue, a stale
+  // result needs no replay -- there is nothing to coalesce into, since the
+  // newer selection is already what the author meant to load -- so it is simply
+  // discarded.
+  let loadToken = 0;
+
   loadControl.addEventListener("change", () => {
     const file = loadControl.files?.[0];
     // Cleared unconditionally so choosing the very same file again still fires a
@@ -229,24 +254,34 @@ export function startApp(
     loadControl.value = "";
     if (!file) return;
 
+    const token = ++loadToken;
+
     loadBookFileAdapter(file)
       .then((source) => {
+        if (token !== loadToken) return; // superseded by a later selection
+
         // Asked only now that the file is known to be a genuine book: an author
         // who picks the wrong file entirely is told so without first being asked
         // whether to discard their current work over it.
         const proceed = window.confirm("Loading this file replaces the book you are currently editing. Continue?");
         if (!proceed) return;
 
-        // A pending automatic repaint would otherwise still fire moments later
-        // on the source this load is about to replace.
-        clearScheduledRepaint();
+        // `setSource` fires the same update listener a keystroke would, which
+        // arms a debounced repaint of its own when auto-refresh is on -- cleared
+        // here, after the fact, so the immediate repaint below is the only one
+        // that runs. Clearing before `setSource` would not help: the debounce it
+        // is meant to cancel is armed by `setSource` itself, one line later.
         editor.setSource(source);
+        clearScheduledRepaint();
         requestRepaint(source);
         // Both belonged to the book this load just replaced.
         setPrintStatus(undefined);
         setLoadStatus(undefined);
       })
-      .catch((error: unknown) => setLoadStatus(toPreviewError(error)));
+      .catch((error: unknown) => {
+        if (token !== loadToken) return; // superseded by a later selection
+        setLoadStatus(toPreviewError(error));
+      });
   });
 
   requestRepaint(initialSource);

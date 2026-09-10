@@ -13,7 +13,9 @@
  * an unrelated file (a PDF, an image, someone else's JSON) and reject the latter
  * the way issue #1's error surface requires: "a file that cannot be read as a book."
  */
-const FILE_FORMAT = "grimoire-press-book";
+/** Exported for the tests that assemble a lookalike or malformed envelope --
+ * production code that names it is `downloadBook` and `loadBookFile` below. */
+export const FILE_FORMAT = "grimoire-press-book";
 const FILE_FORMAT_VERSION = 1;
 const DOWNLOAD_FILENAME = "book.grimoire.json";
 
@@ -73,7 +75,14 @@ export function downloadBook(source: string): void {
 export async function loadBookFile(file: File): Promise<string> {
   let text: string;
   try {
-    text = await file.text();
+    // `File.text()` decodes UTF-8 non-fatally: an invalid byte sequence becomes
+    // U+FFFD replacement characters rather than a rejection, which would load a
+    // file corrupted in transit as a "book" full of replacement characters and
+    // tell the author nothing. Decoding the raw bytes with `fatal: true` turns
+    // that corruption into the same `UnreadableBookFileError` a shape mismatch
+    // already produces, instead of a silent, wrong book.
+    const bytes = await file.arrayBuffer();
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch (error) {
     throw new UnreadableBookFileError(
       `"${file.name}" could not be read: ${error instanceof Error ? error.message : String(error)}`,

@@ -45,8 +45,7 @@ startApp(
   createEditor,
   paginate,
   printBook,
-  readDraft,
-  createDebouncedPersist(),
+  { read: readDraft, write: createDebouncedPersist() },
   downloadBook,
   loadBookFile,
 );
