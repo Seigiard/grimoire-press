@@ -37,6 +37,20 @@ test.describe("persistence", () => {
     expect(restored).toContain("The referee rolls two dice.");
   });
 
+  test("closing the tab straight after typing does not lose the last edits", async ({ page }) => {
+    // #given: the author writes and closes the tab before the debounce has elapsed
+    await page.locator(".cm-editor").click();
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.type("\n\nDamage is dealt before movement.\n");
+
+    // #when: the page goes away immediately, with no pause to let the timer fire
+    await page.reload();
+
+    // #then: the reopened editor still holds what was written
+    const restored = await page.evaluate(() => window.__editor?.getSource?.());
+    expect(restored).toContain("Damage is dealt before movement.");
+  });
+
   test("a first-time visitor gets a usable editor rather than an error", async ({ page }) => {
     // #given: storage holds no draft (cleared in beforeEach)
     // #when: the editor opens
