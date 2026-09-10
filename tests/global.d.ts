@@ -20,8 +20,18 @@ declare global {
     bottomCenter: string | undefined;
   }
 
+  interface ContainerAfterFailure {
+    rejection: string | undefined;
+    before?: string;
+    after: string;
+    attributesBefore?: string;
+    attributesAfter: string;
+  }
+
   interface Window {
     __paginateBook: (source: string) => Promise<number>;
+    __previewAfterEngineFailure: (goodSource: string, nextSource: string) => Promise<ContainerAfterFailure>;
+    __previewAfterFirstEverEngineFailure: (source: string) => Promise<ContainerAfterFailure>;
     __paginateAndInspect: (source: string) => Promise<PageInspection>;
     __paginateAndInspectHeaders: (source: string) => Promise<HeaderInspection[]>;
     __inspectMarginBoxFonts: (source: string) => Promise<MarginBoxFontInspection>;
