@@ -1,6 +1,6 @@
-// One-off verification script for issue #4's acceptance criteria: a book set
-// in the "default-ru" theme must print with its typefaces actually embedded,
-// not silently falling back on a machine that lacks them.
+// Prints a book through the real browser print engine so the resulting PDF can be
+// inspected: `pdftotext` must extract its text, and `pdffonts` must show every
+// typeface embedded rather than silently fallen back to a machine font.
 //
 // This does not go through the preview's own pagination (Vivliostyle in a
 // CoreViewer, printed through @vivliostyle/core's printHTML) because that
@@ -17,7 +17,7 @@
 // `vite build`/`vitest` already use, in Node, without a browser -- the
 // supported way to import a Vite-only module from a script like this one.
 //
-// Usage: node ./pdfcheck.mjs
+// Usage: npm run check:pdf, then: pdffonts /tmp/check.pdf
 import { chromium } from "@playwright/test";
 import { writeFileSync } from "node:fs";
 import { createServer } from "vite";
