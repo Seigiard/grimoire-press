@@ -18,7 +18,10 @@ export function paginate(container: HTMLElement, html: string): Promise<Paginati
     // a stale render from the previous call must be cleared first: CoreViewer appends
     // to the viewport element, it does not replace what a prior instance left there.
     container.replaceChildren();
-    const viewer = new CoreViewer({ viewportElement: container });
+    // autoResize would register a window resize listener that only a viewer.destroy()
+    // removes, and a viewer is created per call, so leaving it on leaks one listener
+    // per keystroke. The preview repaints from source instead of resizing in place.
+    const viewer = new CoreViewer({ viewportElement: container }, { autoResize: false });
     const blobUrl = URL.createObjectURL(new Blob([html], { type: "text/html" }));
 
     // The 'loaded' event's own payload carries no epageCount (it is just {type:

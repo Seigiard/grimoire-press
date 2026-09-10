@@ -11,8 +11,9 @@ const INITIAL_SOURCE = "# Untitled book\n\nStart writing your book here.\n";
  * adapter arrives as its own parameter, not a bundled options object or a container:
  * three seams, three arguments (ADR-0004).
  *
- * State outside the editor's own buffer is exactly one string, the latest rendered
- * markup, kept so the print control always prints what the preview last showed.
+ * Nothing outside the editor's own buffer is stored. The preview markup is derived
+ * whenever it is needed, to repaint and to print alike, which is the state model
+ * ADR-0004 records.
  */
 export function startApp(
   editorContainer: HTMLElement,
@@ -22,18 +23,21 @@ export function startApp(
   paginateAdapter: typeof paginate,
   printBookAdapter: typeof printBook,
 ): EditorHandle {
-  let latestMarkup = renderBook({ source: INITIAL_SOURCE });
-
   const repaint = (source: string): void => {
     const book: Book = { source };
-    latestMarkup = renderBook(book);
-    void paginateAdapter(previewContainer, latestMarkup);
+    // A pagination failure reaches the console only. Reporting it to the author is
+    // issue #6, which owns the preview's error surface.
+    void paginateAdapter(previewContainer, renderBook(book)).catch((error: unknown) => {
+      console.error(error);
+    });
   };
 
   const editor = createEditorAdapter(editorContainer, INITIAL_SOURCE, repaint);
-  printControl.addEventListener("click", () => printBookAdapter(latestMarkup));
+  printControl.addEventListener("click", () => {
+    printBookAdapter(renderBook({ source: editor.getSource() }));
+  });
 
-  void paginateAdapter(previewContainer, latestMarkup);
+  repaint(INITIAL_SOURCE);
 
   return editor;
 }
