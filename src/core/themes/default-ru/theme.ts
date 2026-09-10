@@ -1,15 +1,19 @@
-import alegreya from "./fonts/alegreya/Alegreya.woff2?inline";
-import alegreyaItalic from "./fonts/alegreya/Alegreya-Italic.woff2?inline";
-import vollkorn from "./fonts/vollkorn/Vollkorn.woff2?inline";
-import vollkornItalic from "./fonts/vollkorn/Vollkorn-Italic.woff2?inline";
+import alegreya400 from "./fonts/alegreya/Alegreya-400.woff2?inline";
+import alegreya600 from "./fonts/alegreya/Alegreya-600.woff2?inline";
+import alegreyaItalic400 from "./fonts/alegreya/Alegreya-Italic-400.woff2?inline";
+import alegreyaItalic600 from "./fonts/alegreya/Alegreya-Italic-600.woff2?inline";
+import vollkorn400 from "./fonts/vollkorn/Vollkorn-400.woff2?inline";
+import vollkorn600 from "./fonts/vollkorn/Vollkorn-600.woff2?inline";
+import vollkornItalic400 from "./fonts/vollkorn/Vollkorn-Italic-400.woff2?inline";
+import vollkornItalic600 from "./fonts/vollkorn/Vollkorn-Italic-600.woff2?inline";
 import type { Theme } from "../theme";
 import magickCss from "./magick.css?raw";
 
 /**
- * Vollkorn (body) and Alegreya (headings), both variable fonts covering
- * Cyrillic and Latin in the same face -- see `magick.css`'s header for why
- * these replace magick.css's original two typefaces, and CONTEXT.md's Theme
- * entry for why one face per role, not one face per alphabet, is the point.
+ * Vollkorn (body) and Alegreya (headings), both covering Cyrillic and Latin in
+ * the same face -- see `magick.css`'s header for why these replace magick.css's
+ * original two typefaces, and CONTEXT.md's Theme entry for why one face per
+ * role, not one face per alphabet, is the point.
  *
  * `?inline` (Vite's own asset-import suffix, not a project convention) turns
  * each WOFF2 file into a base64 `data:` URI at import time. That is the
@@ -18,33 +22,82 @@ import magickCss from "./magick.css?raw";
  * standalone -- ever issues a request for a typeface, to this host or any
  * other. `?raw` does the equivalent for magick.css: its text, unmodified by
  * any bundler transform, ends up verbatim in the theme's CSS.
+ *
+ * Eight files, one per weight and style, rather than the two variable files
+ * per family these used to be (issue #9). Both families ship upstream as
+ * variable fonts with a 400-900 weight axis, and Chromium's PDF backend
+ * refuses to embed any typeface whose file declares variation axes: it writes
+ * every glyph as a Type 3 drawing procedure instead of embedding the outline
+ * font program, so the printed book carried no real typeface at all. The test
+ * is for the presence of the `fvar` table, not for a non-default coordinate,
+ * so no `@font-face` declaration can avoid it -- narrowing `font-weight` to a
+ * single value was measured and made the PDF 84% larger, because the missing
+ * weight was then faked by synthetic emboldening. The only fix is files with
+ * no axes, which is what `scripts/build-static-fonts.py` produces from the
+ * variable sources kept beside them under each family's `upstream` directory.
+ *
+ * Every weight and style the theme's own CSS can ask for needs a real file
+ * here. A weight with no file is either synthesised by the browser or matched
+ * against a file that does not carry it, and either way the face on the page
+ * is not the face this theme chose. That is also why none of these declares a
+ * weight *range*: a leftover `400 900` is an exact match for 600 and would win
+ * over the real 600 file, quietly putting the variable file -- and Type 3 --
+ * back on the page.
  */
 const FONT_FACES = `
 @font-face {
   font-family: "Vollkorn";
-  src: url("${vollkorn}") format("woff2");
-  font-weight: 400 900;
+  src: url("${vollkorn400}") format("woff2");
+  font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
   font-family: "Vollkorn";
-  src: url("${vollkornItalic}") format("woff2");
-  font-weight: 400 900;
+  src: url("${vollkorn600}") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Vollkorn";
+  src: url("${vollkornItalic400}") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Vollkorn";
+  src: url("${vollkornItalic600}") format("woff2");
+  font-weight: 600;
   font-style: italic;
   font-display: swap;
 }
 @font-face {
   font-family: "Alegreya";
-  src: url("${alegreya}") format("woff2");
-  font-weight: 400 900;
+  src: url("${alegreya400}") format("woff2");
+  font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
   font-family: "Alegreya";
-  src: url("${alegreyaItalic}") format("woff2");
-  font-weight: 400 900;
+  src: url("${alegreya600}") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Alegreya";
+  src: url("${alegreyaItalic400}") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Alegreya";
+  src: url("${alegreyaItalic600}") format("woff2");
+  font-weight: 600;
   font-style: italic;
   font-display: swap;
 }

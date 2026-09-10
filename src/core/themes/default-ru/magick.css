@@ -19,10 +19,14 @@
  *     acceptance criteria -- so their selectors fall back to a generic family.
  *     The blockquote and sidenote accents that used Spectral use Vollkorn
  *     instead, so the page still reads as one coherent, self-hosted theme.
- *   - The body's `font-weight: 300` becomes `400`: Vollkorn is a variable font
- *     whose axis starts at 400, so 300 would just clamp to the same value --
- *     this only makes the clamp visible in the source. Headings keep their
- *     `600`; that's inside both variable fonts' 400-900 axis already.
+ *   - The body's `font-weight: 300` becomes `400`: the lightest Vollkorn this
+ *     theme ships is 400, so 300 would just resolve to the same file -- this
+ *     only makes that visible in the source. Headings keep their `600`.
+ *     Those two values are the whole of what this file may ask for: `theme.ts`
+ *     ships one static font file per weight and style (issue #9), and a weight
+ *     named here with no file behind it is synthesised by the browser rather
+ *     than drawn by the typeface. Adding a third weight to this file means
+ *     adding it to `scripts/build-static-fonts.py` and to `theme.ts` too.
  *   - The `prefers-color-scheme: dark` block is gone. ADR-0003 names it
  *     directly: it would invert a page on print, and the whole point of this
  *     project is that the preview shows exactly what prints.
