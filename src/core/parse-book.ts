@@ -223,6 +223,7 @@ function parseTopLevel(doc: Doc, from: number, to: number): BookBlock[] {
     }
     if (tag.kind === "page-open") {
       assertNoColumnCount(tag.columns, i);
+      assertNoUnknownAttribute(tag.attributeNames, i);
       const closeIndex = findMatchingClose(doc, i + 1, to, "page-open", "page-close", "Page");
       blocks.push({
         kind: "page",
@@ -255,6 +256,25 @@ function assertNoColumnCount(columns: string | undefined, tagLine: number): void
     `<Page columns="${columns}"> on line ${tagLine + 1} declares a column count, but a page has no columns`,
     tagLine + 1,
   );
+}
+
+/**
+ * The attributes a page can be given. `columns` is here because it must be
+ * recognised in order to be refused by name just above; a page really has none.
+ *
+ * An attribute a page has no meaning for is refused rather than ignored. Elsewhere
+ * an unread attribute is harmless, but a page is the one block an author arranges
+ * deliberately, and a misspelled `colums` or an `orientaton` that quietly did
+ * nothing would leave them reading a sheet that came out wrong for a reason the
+ * editor never mentioned.
+ */
+const PAGE_ATTRIBUTES: ReadonlySet<string> = new Set(["columns"]);
+
+function assertNoUnknownAttribute(names: readonly string[], tagLine: number): void {
+  for (const name of names) {
+    if (PAGE_ATTRIBUTES.has(name)) continue;
+    throw new MarkupError(`<Page ${name}="..."> on line ${tagLine + 1} declares an attribute a page does not have`, tagLine + 1);
+  }
 }
 
 function resolveColumns(columns: string | undefined, tagLine: number): number {

@@ -387,6 +387,19 @@ describe("parseBook page vocabulary", () => {
     expectMarkupError(source, 2, /<Page columns="2">.*a page has no columns/);
   });
 
+  it("rejects an attribute a page does not have, rather than ignoring it", () => {
+    // #given: a page whose author reached for a column count and misspelled it (line 2)
+    const source = ['<Book size="A5">', '<Page colums="2">', "A card that stands on its own.", "</Page>", "</Book>"].join(
+      "\n",
+    );
+
+    // #when: it is parsed
+    // #then: they are told the attribute means nothing here, on the line they wrote
+    // it -- an attribute that quietly did nothing would leave them reading a sheet
+    // that came out wrong for a reason nothing in the editor mentioned
+    expectMarkupError(source, 2, /<Page colums=.*a page does not have/);
+  });
+
   it("leaves a break inside a section working, so the reason above is about pages and not about breaks", () => {
     // #given: a section holding both kinds of break (lines 4 and 6)
     const source = [

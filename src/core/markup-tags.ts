@@ -47,8 +47,15 @@ export type TagLine =
   /** `columns` is carried even though a page has none, so the parser can reject it
    * by name. A page attribute a page really does take -- `orientation`, issue #22
    * -- is read from the same attribute run and belongs beside this, not instead of
-   * it: a page takes no column count, which is narrower than taking no attributes. */
-  | { readonly kind: "page-open"; readonly columns: string | undefined }
+   * it: a page takes no column count, which is narrower than taking no attributes.
+   *
+   * `attributeNames` is every name the run carried, in the order it carried them,
+   * so the parser can refuse one it has no meaning for instead of ignoring it. A
+   * page is the only tag that does this: an attribute that does nothing is worse
+   * on a page than elsewhere, because a page exists to be arranged deliberately
+   * and a misspelled `colums` would leave the author reading a sheet that looks
+   * right for a reason they never asked for. */
+  | { readonly kind: "page-open"; readonly columns: string | undefined; readonly attributeNames: readonly string[] }
   | { readonly kind: "page-close" }
   | { readonly kind: "page-break" }
   | { readonly kind: "column-break" };
@@ -65,6 +72,12 @@ function parseBookAttrs(raw: string): { size: string | undefined; theme: string 
     if (match[1] === "theme") theme = match[2];
   }
   return { size, theme };
+}
+
+/** Every attribute name a captured run carried, in source order, so a caller that
+ * refuses the ones it has no meaning for can name the one the author wrote. */
+function attributeNames(raw: string): string[] {
+  return Array.from(raw.matchAll(ATTR), (match) => match[1]!);
 }
 
 /** One attribute's value out of a captured attribute run, or `undefined` when the
@@ -100,7 +113,12 @@ export function matchTagLine(line: string): TagLine | undefined {
   if (SECTION_CLOSE.test(trimmed)) return { kind: "section-close" };
 
   const pageOpen = PAGE_OPEN.exec(trimmed);
-  if (pageOpen) return { kind: "page-open", columns: attributeValue(pageOpen[1] ?? "", "columns") };
+  if (pageOpen)
+    return {
+      kind: "page-open",
+      columns: attributeValue(pageOpen[1] ?? "", "columns"),
+      attributeNames: attributeNames(pageOpen[1] ?? ""),
+    };
   if (PAGE_CLOSE.test(trimmed)) return { kind: "page-close" };
 
   if (PAGE_BREAK.test(trimmed)) return { kind: "page-break" };
@@ -114,9 +132,10 @@ export function matchTagLine(line: string): TagLine | undefined {
  * `<PageBrek />` -- so a caller can report an unknown tag rather than silently
  * treating the line as prose. Undefined for a line that either is one of our real
  * tags (already handled by `matchTagLine`) or is not tag-shaped at all, which is
- * ordinary prose; a known tag name with an attribute `matchTagLine` doesn't
- * recognise (e.g. `<Book unknown="x">`) is left to fall through to prose too,
- * unchanged from before this function existed, rather than guessed at here.
+ * ordinary prose. A known tag name carrying an attribute nothing reads -- `<Book
+ * unknown="x">` -- is not this function's business either: it matches its own tag
+ * rule and never reaches here, and what an attribute nobody reads means is the
+ * parser's decision, made per tag.
  */
 export function unrecognizedTagName(line: string): string | undefined {
   if (INDENTED.test(line) || matchTagLine(line) !== undefined) return undefined;
