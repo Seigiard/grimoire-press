@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>engine timeout test harness</title>
+    <script>
+      // A clock for the two deadlines issue #10 adds, and for nothing else.
+      //
+      // The bounds are 30 and 60 seconds, deliberately, so no test may sit through
+      // one. Faking every timer in the page would fake the preview's 400ms debounce,
+      // CodeMirror's own scheduling and Vivliostyle's layout time slices along with
+      // them -- the real engine has to keep running here, because what these tests
+      // watch is a real repaint being restored and a real print starting fresh
+      // afterwards. So only timers set for at least the shortest bound this
+      // application uses are held back: everything else goes straight to the real
+      // clock, untouched. A page that sets no such timer at all leaves this holding
+      // nothing, which is exactly what `__pendingEngineDeadlines` is for.
+      //
+      // Installed from a classic script so it is in place before any module runs;
+      // the adapters look `setTimeout` up on the global object at each call, so
+      // nothing has to be imported or injected for them to land here.
+      (() => {
+        const SHORTEST_DEADLINE_MS = 30_000;
+        const realSetTimeout = window.setTimeout.bind(window);
+        const realClearTimeout = window.clearTimeout.bind(window);
+        const deadlines = new Map();
+        // Negative, so `clearTimeout` can never mistake one of these for a real
+        // timer id (the browser's own are positive).
+        let nextId = 0;
+
+        window.setTimeout = (handler, delay, ...args) => {
+          if (typeof handler === "function" && typeof delay === "number" && delay >= SHORTEST_DEADLINE_MS) {
+            const id = --nextId;
+            deadlines.set(id, { remaining: delay, fire: () => handler(...args) });
+            return id;
+          }
+          return realSetTimeout(handler, delay, ...args);
+        };
+
+        window.clearTimeout = (id) => {
+          if (typeof id === "number" && id < 0) deadlines.delete(id);
+          else realClearTimeout(id);
+        };
+
+        window.__advanceEngineClock = (ms) => {
+          for (const [id, deadline] of [...deadlines]) {
+            deadline.remaining -= ms;
+            if (deadline.remaining <= 0) {
+              deadlines.delete(id);
+              deadline.fire();
+            }
+          }
+        };
+
+        window.__pendingEngineDeadlines = () => deadlines.size;
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="editor"></div>
+    <div id="preview"></div>
+    <button id="print"></button>
+    <button id="refresh"></button>
+    <button id="download"></button>
+    <input id="load" type="file" />
+    <input id="auto-refresh" type="checkbox" checked />
+    <div id="status" hidden></div>
+    <script type="module">
+      import { CoreViewer } from "@vivliostyle/core";
+
+      import { startApp } from "/src/app/start-app.ts";
+      import { createEditor } from "/src/adapters/editor.ts";
+      import { downloadBook, loadBookFile } from "/src/adapters/file.ts";
+      import { paginate } from "/src/adapters/pagination.ts";
+      import { printBook } from "/src/adapters/printing.ts";
+
+      // An engine that has been handed a book and says nothing back -- the failure
+      // issue #10 is about, which has no document-level trigger at all (issue #11
+      // established that Vivliostyle paginates even an empty string, and a document
+      // it cannot fetch makes it *fail*, promptly, which is the opposite of this).
+      // It is held one level down instead, at the single call that starts a run:
+      // `loadDocument` is where both `paginate` and `printHTML` hand the engine its
+      // document, so withholding that one call leaves a real CoreViewer sitting on a
+      // real book with every real listener attached, having neither loaded nor
+      // failed. Patching a prototype from a harness is what tests/preview.spec.ts
+      // already does to `Element.prototype.replaceChildren`.
+      const nativeLoadDocument = CoreViewer.prototype.loadDocument;
+      let stalling = false;
+      const stalled = [];
+
+      CoreViewer.prototype.loadDocument = function (...args) {
+        if (stalling) {
+          stalled.push({ viewer: this, args });
+          return undefined;
+        }
+        return nativeLoadDocument.apply(this, args);
+      };
+
+      window.__stallEngine = () => {
+        stalling = true;
+      };
+      window.__unstallEngine = () => {
+        stalling = false;
+      };
+      window.__stalledEngineRuns = () => stalled.length;
+
+      // Lets the oldest withheld run finally reach the engine, unchanged: the book
+      // loads for real and the run answers for real, only later than it should
+      // have. Oldest rather than all, because a test that has two runs withheld at
+      // once is asking what happens to the *abandoned* one while the newer one is
+      // still waiting.
+      window.__resumeOldestStalledEngineRun = () => {
+        const run = stalled.shift();
+        if (run) nativeLoadDocument.apply(run.viewer, run.args);
+        return run !== undefined;
+      };
+
+      // The same, but answering with a failure: `loadDocument` with no URL is
+      // CoreViewer's own "No URL specified" path, which dispatches the engine's real
+      // 'error' event through the engine's own event target. That matters -- an
+      // adapter that stopped listening when it gave up genuinely does not hear this,
+      // where calling a captured handler directly would prove nothing.
+      window.__failOldestStalledEngineRun = () => {
+        const run = stalled.shift();
+        if (run) nativeLoadDocument.call(run.viewer, undefined);
+        return run !== undefined;
+      };
+
+      // `printHTML` appends one hidden iframe per print attempt it actually starts,
+      // and removes it again only once that attempt has finished. Counting them is
+      // how a test sees whether a click started a print of its own or joined one
+      // already in flight, which promise identity cannot show from outside the app.
+      window.__printAttemptsStarted = () => document.querySelectorAll("iframe").length;
+
+      const editorContainer = document.getElementById("editor");
+      const previewContainer = document.getElementById("preview");
+      const printControl = document.getElementById("print");
+      const refreshControl = document.getElementById("refresh");
+      const autoRefreshControl = document.getElementById("auto-refresh");
+      const statusContainer = document.getElementById("status");
+      const downloadControl = document.getElementById("download");
+      const loadControl = document.getElementById("load");
+
+      // The real pagination and printing adapters, at the seam issue #1's
+      // architecture built for substitution -- not substituted here. Both bounds
+      // live inside those adapters, because both guards they release do: nothing
+      // above them can release printing's module-level single-flight guard, and
+      // nothing above them knows what the preview held before the engine emptied
+      // it. So these tests drive the real ones.
+      const editor = startApp(
+        {
+          editorContainer,
+          previewContainer,
+          printControl,
+          refreshControl,
+          autoRefreshControl,
+          statusContainer,
+          downloadControl,
+          loadControl,
+        },
+        createEditor,
+        paginate,
+        printBook,
+        { read: () => undefined, write: () => {} },
+        downloadBook,
+        loadBookFile,
+      );
+
+      window.__editor = editor;
+    </script>
+  </body>
+</html>
