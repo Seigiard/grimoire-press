@@ -7,7 +7,7 @@ import { EngineTimeoutError } from "./engine-timeout";
 // book out again from scratch, and the author is deliberately standing by for the
 // dialogue, so cutting a long book off early costs them the print they asked for
 // rather than a preview that will repaint again on the next keystroke anyway.
-const PRINT_TIMEOUT_SECONDS = 60;
+export const PRINT_TIMEOUT_SECONDS = 60;
 
 /**
  * Prints an HTML document (the same string the preview pane paginated) through the
@@ -33,10 +33,18 @@ const PRINT_TIMEOUT_SECONDS = 60;
  * That guard is what makes a hung print permanent rather than merely slow: neither
  * callback runs, so nothing releases it, and every later click hands the author the
  * same stuck promise back. Rejecting after `PRINT_TIMEOUT_SECONDS` is what releases
- * it (issue #10). The hidden iframe cannot be called off and may still call back for
- * the abandoned attempt; the guard is released once, on that attempt settling, and
- * never written again -- so a late callback cannot reclaim a guard that by then
- * belongs to whatever the author started next.
+ * it (issue #10).
+ *
+ * The hidden iframe cannot be called off and may still call back for an attempt
+ * already given up on. Settling a promise twice is a no-op, but `printCallback`
+ * opens the browser's print dialogue *before* it resolves, and that is a real thing
+ * happening to a real author -- a dialogue for a book they asked to print minutes
+ * ago, over whatever they are doing now. `printHTML` offers no way to take its
+ * callbacks back, so where `pagination.ts` can stop listening, this has to decline
+ * to act instead: the bound marks the attempt abandoned, and both callbacks check
+ * that before doing anything at all. The guard itself is released once, on the
+ * attempt settling, and never written again, so a late callback cannot reclaim one
+ * that by then belongs to whatever the author started next.
  */
 let inFlight: Promise<void> | undefined;
 
@@ -46,14 +54,25 @@ export function printBook(html: string): Promise<void> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   const attempt = new Promise<void>((resolve, reject) => {
-    timeoutId = setTimeout(() => reject(new EngineTimeoutError(PRINT_TIMEOUT_SECONDS)), PRINT_TIMEOUT_SECONDS * 1000);
+    // Set by the bound below and read by both callbacks: the hidden iframe keeps
+    // working after this attempt has been given up on, and neither of its answers
+    // may act on a print nobody is waiting for any more.
+    let abandoned = false;
+
+    timeoutId = setTimeout(() => {
+      abandoned = true;
+      reject(new EngineTimeoutError(PRINT_TIMEOUT_SECONDS));
+    }, PRINT_TIMEOUT_SECONDS * 1000);
+
     printHTML(html, {
       title: "Grimoire Press",
       printCallback: (iframeWindow) => {
+        if (abandoned) return;
         iframeWindow.print();
         resolve();
       },
       errorCallback: (message) => {
+        if (abandoned) return;
         reject(new Error(`Vivliostyle failed to prepare the book for printing: ${message}`));
       },
       hideIframe: true,
