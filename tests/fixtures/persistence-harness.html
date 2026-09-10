@@ -24,6 +24,9 @@
     <div id="editor"></div>
     <div id="preview"></div>
     <button id="print"></button>
+    <button id="refresh"></button>
+    <input id="auto-refresh" type="checkbox" checked />
+    <div id="status" hidden></div>
     <script type="module">
       import { startApp } from "/src/app/start-app.ts";
       import { createEditor } from "/src/adapters/editor.ts";
@@ -35,11 +38,17 @@
       const editorContainer = document.getElementById("editor");
       const previewContainer = document.getElementById("preview");
       const printControl = document.getElementById("print");
+      const refreshControl = document.getElementById("refresh");
+      const autoRefreshControl = document.getElementById("auto-refresh");
+      const statusContainer = document.getElementById("status");
 
       const editor = startApp(
         editorContainer,
         previewContainer,
         printControl,
+        refreshControl,
+        autoRefreshControl,
+        statusContainer,
         createEditor,
         paginate,
         printBook,

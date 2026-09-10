@@ -9,7 +9,7 @@ body {
 #app {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto 1fr auto;
   height: 100vh;
 }
 
@@ -35,4 +35,18 @@ header {
 
 #editor .cm-editor {
   height: 100%;
+}
+
+#status {
+  grid-column: 1 / -1;
+  padding: 0.4rem 1rem;
+  font-family: system-ui, sans-serif;
+  font-size: 0.9rem;
+  color: #7a4b00;
+  background: #fff6e5;
+  border-top: 1px solid #f0d9a8;
+}
+
+#status[hidden] {
+  display: none;
 }

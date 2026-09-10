@@ -1,6 +1,6 @@
 import { DEFAULT_PAGE_SIZE } from "./book";
-import { MarkupError } from "./markup-error";
-import { describeTag, fencedCodeLines, matchTagLine, TagLine } from "./markup-tags";
+import { MarkupError, UnknownTagError } from "./markup-error";
+import { describeTag, fencedCodeLines, matchTagLine, TagLine, unrecognizedTagName } from "./markup-tags";
 import { getTheme } from "./themes/registry";
 import type { Theme } from "./themes/theme";
 
@@ -59,9 +59,20 @@ interface Doc {
   readonly fenced: ReadonlySet<number>;
 }
 
-/** The tag at line `i`, or `undefined` for prose -- fenced code is never a tag. */
+/**
+ * The tag at line `i`, or `undefined` for prose -- fenced code is never a tag.
+ * Throws `UnknownTagError` for a line shaped like a tag whose name isn't one of
+ * ours, so every scan below that calls this also catches an author's typo, without
+ * each of them separately having to check for it.
+ */
 function tagAt(doc: Doc, i: number): TagLine | undefined {
-  return doc.fenced.has(i) ? undefined : matchTagLine(doc.lines[i]!);
+  if (doc.fenced.has(i)) return undefined;
+  const line = doc.lines[i]!;
+  const tag = matchTagLine(line);
+  if (tag !== undefined) return tag;
+  const unknown = unrecognizedTagName(line);
+  if (unknown !== undefined) throw new UnknownTagError(unknown, i + 1);
+  return undefined;
 }
 
 /**
@@ -239,6 +250,7 @@ function parseSectionContent(doc: Doc, from: number, to: number): SectionContent
 
 function assertOnlyBlank(doc: Doc, from: number, to: number, where: string): void {
   for (let i = from; i < to; i++) {
+    tagAt(doc, i); // throws UnknownTagError for a mistyped tag before <Book> or after </Book>
     if (doc.lines[i]!.trim() !== "") {
       throw new MarkupError(`content on line ${i + 1} appears ${where}`, i + 1);
     }

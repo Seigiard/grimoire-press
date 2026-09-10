@@ -24,6 +24,11 @@ const PAGE_BREAK = /^<PageBreak\s*\/>$/;
 const COLUMN_BREAK = /^<ColumnBreak\s*\/>$/;
 const INDENTED = /^(?: {4}|\t)/;
 const FENCE = /^(`{3,}|~{3,})/;
+// The same silhouette as one of our real tags -- a bare, capitalized element alone
+// on its own line -- but not tied to any specific one of them. Used only to notice
+// when an author typed something tag-shaped that isn't in KNOWN_TAG_NAMES below.
+const ANY_TAG = /^<\/?([A-Z][A-Za-z0-9]*)(?:\s+[^>]*)?\s*\/?>$/;
+const KNOWN_TAG_NAMES = new Set(["Book", "Section", "PageBreak", "ColumnBreak"]);
 
 export type TagLine =
   | { readonly kind: "book-open"; readonly size: string | undefined; readonly theme: string | undefined }
@@ -72,6 +77,22 @@ export function matchTagLine(line: string): TagLine | undefined {
   if (COLUMN_BREAK.test(trimmed)) return { kind: "column-break" };
 
   return undefined;
+}
+
+/**
+ * The name of a tag-shaped line that is not one of ours -- e.g. a misspelled
+ * `<PageBrek />` -- so a caller can report an unknown tag rather than silently
+ * treating the line as prose. Undefined for a line that either is one of our real
+ * tags (already handled by `matchTagLine`) or is not tag-shaped at all, which is
+ * ordinary prose; a known tag name with an attribute `matchTagLine` doesn't
+ * recognise (e.g. `<Book unknown="x">`) is left to fall through to prose too,
+ * unchanged from before this function existed, rather than guessed at here.
+ */
+export function unrecognizedTagName(line: string): string | undefined {
+  if (INDENTED.test(line) || matchTagLine(line) !== undefined) return undefined;
+  const match = ANY_TAG.exec(line.trim());
+  if (match === null || KNOWN_TAG_NAMES.has(match[1]!)) return undefined;
+  return match[1];
 }
 
 /**
