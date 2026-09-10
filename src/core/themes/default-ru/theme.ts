@@ -22,18 +22,19 @@ import magickCss from "./magick.css?raw";
  * other. `?raw` does the equivalent for magick.css: its text, unmodified by
  * any bundler transform, ends up verbatim in the theme's CSS.
  *
- * Seven files, one per weight and style the theme's CSS can reach, rather than
- * the two variable files per family these used to be (issue #9). Both families ship upstream as
- * variable fonts with a 400-900 weight axis, and Chromium's PDF backend
- * refuses to embed any typeface whose file declares variation axes: it writes
- * every glyph as a Type 3 drawing procedure instead of embedding the outline
- * font program, so the printed book carried no real typeface at all. The test
- * is for the presence of the `fvar` table, not for a non-default coordinate,
- * so no `@font-face` declaration can avoid it -- narrowing `font-weight` to a
- * single value was measured and made the PDF 84% larger, because the missing
- * weight was then faked by synthetic emboldening. The only fix is files with
- * no axes, which is what `scripts/build-static-fonts.py` produces from the
- * variable sources kept beside them under each family's `upstream` directory.
+ * Seven files, one per weight and style the theme's CSS can reach, rather
+ * than the two variable files per family these used to be (issue #9). Both
+ * families ship upstream as variable fonts with a 400-900 weight axis, and
+ * Chromium's PDF backend refuses to embed any typeface whose file declares
+ * variation axes: it writes every glyph as a Type 3 drawing procedure instead
+ * of embedding the outline font program, so the printed book carried no real
+ * typeface at all. The test is for the presence of the `fvar` table, not for
+ * a non-default coordinate, so no `@font-face` declaration can avoid it --
+ * narrowing `font-weight` to a single value was measured and made the PDF 84%
+ * larger, because the missing weight was then faked by synthetic emboldening.
+ * The only fix is files with no axes, which is what
+ * `scripts/build-static-fonts.py` produces from the variable sources kept
+ * beside them under each family's `upstream` directory.
  *
  * Seven and not eight because Alegreya italic at 400 is unreachable: Alegreya is
  * set in `h1`..`h4` at weight 600 and in `@top-center` at weight 400 with
