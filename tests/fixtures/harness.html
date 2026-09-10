@@ -296,6 +296,27 @@
 
         return { pageCount, boxes };
       };
+
+      // Issue #23's seam: a book's source in, the pagination adapter's own report
+      // of which pages did not fit out -- beside the page count it already
+      // returns, because an overflowing page is not a failure and the adapter
+      // does not reject over one.
+      //
+      // `renderedPages` is how many physical pages the engine actually left in the
+      // preview container, so a test can see that the book is still on screen
+      // while the overflow is reported rather than withheld over it. It is the
+      // engine's own per-page containers that are counted, never anything
+      // render-book.ts wrote.
+      window.__paginateAndReportOverflow = async (source) => {
+        const html = renderBook({ source });
+        const container = document.getElementById("preview");
+        const { pageCount, overflowingPages } = await paginate(container, html);
+        return {
+          pageCount,
+          overflowingPages,
+          renderedPages: container.querySelectorAll("[data-vivliostyle-page-index]").length,
+        };
+      };
     </script>
   </body>
 </html>

@@ -9,10 +9,32 @@ import { EngineTimeoutError } from "./engine-timeout";
 // while into a book that can never be previewed at all.
 export const PAGINATION_TIMEOUT_SECONDS = 30;
 
+/**
+ * A page (CONTEXT.md's Page) the engine spread over more than one physical page:
+ * the source line the author declared it on, and how many physical pages its
+ * content actually took. Never fewer than two -- a page that fits is not reported
+ * at all.
+ *
+ * Not an error, and deliberately not one of the app's `PreviewError` cases: that
+ * union is the closed set of ways to fail to produce a book, and a book that
+ * overflows was produced. It is only a book that no longer matches what its author
+ * declared, which is something to tell them about while still showing it.
+ */
+export interface OverflowingPage {
+  readonly line: number;
+  readonly pages: number;
+}
+
 export interface PaginationResult {
   readonly pageCount: number;
   /** Each page's rendered size in CSS pixels, driven by the book's `@page size`. */
   readonly pageSizes: ReadonlyArray<{ readonly width: number; readonly height: number }>;
+  /**
+   * The pages whose content did not fit on the one physical page they claim, in
+   * source order. Empty when every page fits, which is the ordinary case and the
+   * only thing a book of nothing but sections can produce.
+   */
+  readonly overflowingPages: readonly OverflowingPage[];
 }
 
 /**
@@ -95,8 +117,11 @@ export function paginate(container: HTMLElement, html: string): Promise<Paginati
     };
     const onLoaded = (payload: Payload): void => {
       const pageSizes = viewer.getPageSizes();
+      // Read off the laid-out document, before cleanup and while the container
+      // still holds the book the engine just produced.
+      const overflowingPages = findOverflowingPages(container);
       cleanup();
-      resolve({ pageCount: latestEpageCount ?? payload.epageCount, pageSizes });
+      resolve({ pageCount: latestEpageCount ?? payload.epageCount, pageSizes, overflowingPages });
     };
     const onError = (payload: Payload): void => {
       cleanup();
@@ -142,4 +167,51 @@ export function paginate(container: HTMLElement, html: string): Promise<Paginati
     viewer.addListener("error", onError);
     viewer.loadDocument(blobUrl);
   });
+}
+
+/**
+ * The pages that took more than the one physical page they claim, read off the
+ * document the engine has just laid out.
+ *
+ * Detection belongs here and nowhere above: this is the only place that sees a
+ * laid-out book. A named CSS page is a page *style*, not a page *quota* (ADR-0007)
+ * -- measured, fourteen paragraphs inside one produced two pages, both carrying its
+ * own styling -- so the engine will not prevent this and "exactly one page" stays
+ * ours to check.
+ *
+ * The check is a count. `render-book.ts` marks a page's own element with
+ * `data-grimoire-page`, beside the source line it was declared on; the engine
+ * renders a block once per physical page it occupies, inside that page's own
+ * container. So a page that fits appears under one page index and a page that
+ * spilled appears under several, and the number of distinct indices is the number
+ * of pages it took.
+ *
+ * The mark, and not the `page` class or `data-line` alone: a book may contain raw
+ * HTML (ADR-0006), so an author writing either of those by hand would otherwise
+ * make their own book report an overflow that never happened.
+ *
+ * Nothing here rejects, and the caller is handed this beside the page count rather
+ * than instead of it: the book paginated, and an author deciding what to cut needs
+ * to see what spilled.
+ */
+function findOverflowingPages(container: HTMLElement): OverflowingPage[] {
+  const physicalPagesByLine = new Map<number, Set<number>>();
+
+  for (const element of container.querySelectorAll("[data-grimoire-page][data-line]")) {
+    const line = Number(element.getAttribute("data-line"));
+    const physicalPage = element.closest("[data-vivliostyle-page-index]");
+    if (!Number.isInteger(line) || physicalPage === null) continue;
+
+    const index = Number(physicalPage.getAttribute("data-vivliostyle-page-index"));
+    if (!Number.isInteger(index)) continue;
+
+    const indices = physicalPagesByLine.get(line) ?? new Set<number>();
+    indices.add(index);
+    physicalPagesByLine.set(line, indices);
+  }
+
+  return Array.from(physicalPagesByLine)
+    .filter(([, indices]) => indices.size > 1)
+    .map(([line, indices]) => ({ line, pages: indices.size }))
+    .sort((a, b) => a.line - b.line);
 }

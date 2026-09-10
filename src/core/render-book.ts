@@ -131,7 +131,12 @@ function renderBlock(block: BookBlock, pageName: string): string {
  */
 function renderPage(page: Page, pageName: string): string {
   const contentHtml = page.content.map(renderSectionContent).join("\n");
-  return `<div class="page" data-line="${page.line}" style="page: ${pageName};">
+  // `data-grimoire-page` is the renderer's own mark on the block, and the only thing
+  // the pagination adapter counts pages by (issue #23). A class and a `data-line`
+  // are both things an author's own HTML may carry (ADR-0006), and between them
+  // they would let a book forge a report about itself; this attribute is written
+  // nowhere else.
+  return `<div class="page" data-grimoire-page data-line="${page.line}" style="page: ${pageName};">
 ${contentHtml}
 </div>`;
 }
