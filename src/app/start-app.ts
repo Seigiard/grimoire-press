@@ -9,7 +9,10 @@ const INITIAL_SOURCE = "# Untitled book\n\nStart writing your book here.\n";
 /**
  * Wires the editor, pagination, and printing adapters to core's pure rendering. Each
  * adapter arrives as its own parameter, not a bundled options object or a container:
- * three seams, three arguments (ADR-0004).
+ * four seams, four arguments (ADR-0004).
+ *
+ * Persistence is delegated to an adapter function that reads and writes the draft
+ * to browser storage. The adapter is responsible for debouncing writes.
  *
  * Nothing outside the editor's own buffer is stored. The preview markup is derived
  * whenever it is needed, to repaint and to print alike, which is the state model
@@ -22,6 +25,8 @@ export function startApp(
   createEditorAdapter: typeof createEditor,
   paginateAdapter: typeof paginate,
   printBookAdapter: typeof printBook,
+  persistRead: () => string | undefined,
+  persistWrite: (source: string) => void,
 ): EditorHandle {
   const repaint = (source: string): void => {
     const book: Book = { source };
@@ -32,12 +37,18 @@ export function startApp(
     });
   };
 
-  const editor = createEditorAdapter(editorContainer, INITIAL_SOURCE, repaint);
+  const initialSource = persistRead() ?? INITIAL_SOURCE;
+  const onChange = (source: string): void => {
+    repaint(source);
+    persistWrite(source);
+  };
+
+  const editor = createEditorAdapter(editorContainer, initialSource, onChange);
   printControl.addEventListener("click", () => {
     printBookAdapter(renderBook({ source: editor.getSource() }));
   });
 
-  repaint(INITIAL_SOURCE);
+  repaint(initialSource);
 
   return editor;
 }
