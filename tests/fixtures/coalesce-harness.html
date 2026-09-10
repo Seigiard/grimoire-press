@@ -9,11 +9,14 @@
     <div id="preview"></div>
     <button id="print"></button>
     <button id="refresh"></button>
+    <button id="download"></button>
+    <input id="load" type="file" />
     <input id="auto-refresh" type="checkbox" checked />
     <div id="status" hidden></div>
     <script type="module">
       import { startApp } from "/src/app/start-app.ts";
       import { createEditor } from "/src/adapters/editor.ts";
+      import { downloadBook, loadBookFile } from "/src/adapters/file.ts";
       import { printBook } from "/src/adapters/printing.ts";
 
       // A stand-in for the real pagination adapter, substituted at the exact seam
@@ -43,14 +46,27 @@
       const refreshControl = document.getElementById("refresh");
       const autoRefreshControl = document.getElementById("auto-refresh");
       const statusContainer = document.getElementById("status");
+      const downloadControl = document.getElementById("download");
+      const loadControl = document.getElementById("load");
 
       const editor = startApp(
-        { editorContainer, previewContainer, printControl, refreshControl, autoRefreshControl, statusContainer },
+        {
+          editorContainer,
+          previewContainer,
+          printControl,
+          refreshControl,
+          autoRefreshControl,
+          statusContainer,
+          downloadControl,
+          loadControl,
+        },
         createEditor,
         fakePaginate,
         printBook,
         () => undefined,
         () => {},
+        downloadBook,
+        loadBookFile,
       );
 
       window.__editor = editor;

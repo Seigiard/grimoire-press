@@ -8,6 +8,13 @@ import { bookMarkupSyntax } from "./markup-syntax";
 
 export interface EditorHandle {
   getSource(): string;
+  /** Replaces the whole buffer, for loading a book back in from a file (issue
+   * #8). Dispatched as an ordinary transaction rather than a fresh `EditorState`,
+   * so it goes through the same update listener as typing -- the app's `onChange`
+   * persists it as the new draft the same way it would persist a keystroke -- and
+   * lands in CodeMirror's own undo history, so a load the author didn't mean to
+   * make is one `Ctrl+Z` away from being undone. */
+  setSource(source: string): void;
   destroy(): void;
 }
 
@@ -45,6 +52,8 @@ export function createEditor(
 
   return {
     getSource: () => view.state.doc.toString(),
+    setSource: (source: string) =>
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: source } }),
     destroy: () => view.destroy(),
   };
 }

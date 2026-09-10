@@ -1,5 +1,6 @@
 import { renderBook } from "../core/render-book";
 import type { createEditor, EditorHandle } from "../adapters/editor";
+import type { downloadBook, loadBookFile } from "../adapters/file";
 import type { paginate } from "../adapters/pagination";
 import type { printBook } from "../adapters/printing";
 import { describePreviewError, describePrintError, toPreviewError, type PreviewError } from "./preview-error";
@@ -13,11 +14,11 @@ const REFRESH_DEBOUNCE_MS = 400;
 
 /**
  * The DOM elements the app is wired to. Bundled as one named record rather than
- * six positional parameters: five of them share the same `HTMLElement` type, so
+ * positional parameters: most of them share the same `HTMLElement` type, so
  * transposing two at a call site would compile cleanly and only fail at runtime.
  * This is a plain record of references, not a dependency container that resolves
- * anything -- ADR-0004 forbids the latter, not the former; the three adapter
- * functions below stay separate arguments.
+ * anything -- ADR-0004 forbids the latter, not the former; the adapter functions
+ * below stay separate arguments.
  */
 export interface AppElements {
   readonly editorContainer: HTMLElement;
@@ -26,6 +27,8 @@ export interface AppElements {
   readonly refreshControl: HTMLElement;
   readonly autoRefreshControl: HTMLInputElement;
   readonly statusContainer: HTMLElement;
+  readonly downloadControl: HTMLElement;
+  readonly loadControl: HTMLInputElement;
 }
 
 /**
@@ -50,6 +53,16 @@ export interface AppElements {
  * reaches the container (issue #6's first handed-over defect: overlapping repaints
  * had no cancellation, so a slow one could finish after, and clobber, a faster
  * newer one).
+ *
+ * Downloading and loading a book (issue #8) are wired the same way: two more
+ * adapter functions, each its own parameter. Loading replaces the editor's whole
+ * buffer -- through `EditorHandle.setSource`, so it flows through the same
+ * `onChange` a keystroke would and is persisted as the new draft the same way --
+ * after the author confirms, since there is no way back from replacing a book
+ * other than CodeMirror's own undo history. The confirmation is asked only once
+ * the file has already been read and validated, so declining it is the only way a
+ * load has any visible effect on a book that turns out fine; a file this editor
+ * cannot read as a book never reaches the question at all.
  */
 export function startApp(
   elements: AppElements,
@@ -58,21 +71,34 @@ export function startApp(
   printBookAdapter: typeof printBook,
   persistRead: () => string | undefined,
   persistWrite: (source: string) => void,
+  downloadBookAdapter: typeof downloadBook,
+  loadBookFileAdapter: typeof loadBookFile,
 ): EditorHandle {
-  const { editorContainer, previewContainer, printControl, refreshControl, autoRefreshControl, statusContainer } = elements;
+  const {
+    editorContainer,
+    previewContainer,
+    printControl,
+    refreshControl,
+    autoRefreshControl,
+    statusContainer,
+    downloadControl,
+    loadControl,
+  } = elements;
 
-  // The preview's staleness and a print failure are two independent things an
-  // author can be told about at once (issue #6's third handed-over defect: a
-  // shared status sink let a repaint that succeeded silently erase a print
-  // error nobody had acknowledged yet). Each is tracked and rendered on its own,
-  // so clearing one never touches the other.
+  // The preview's staleness, a print failure, and a failed file load are three
+  // independent things an author can be told about at once (issue #6's third
+  // handed-over defect: a shared status sink let a repaint that succeeded
+  // silently erase a print error nobody had acknowledged yet). Each is tracked
+  // and rendered on its own, so clearing one never touches the others.
   let previewError: PreviewError | undefined;
   let printError: PreviewError | undefined;
+  let loadError: PreviewError | undefined;
 
   const renderStatus = (): void => {
     const parts: string[] = [];
     if (previewError !== undefined) parts.push(`Preview is out of date — ${describePreviewError(previewError)}`);
     if (printError !== undefined) parts.push(`Printing failed — ${describePrintError(printError)}`);
+    if (loadError !== undefined) parts.push(`Loading file failed — ${describePreviewError(loadError)}`);
     statusContainer.textContent = parts.join(" ");
     statusContainer.hidden = parts.length === 0;
   };
@@ -84,6 +110,11 @@ export function startApp(
 
   const setPrintStatus = (error: PreviewError | undefined): void => {
     printError = error;
+    renderStatus();
+  };
+
+  const setLoadStatus = (error: PreviewError | undefined): void => {
+    loadError = error;
     renderStatus();
   };
 
@@ -184,6 +215,38 @@ export function startApp(
     printBookAdapter(html)
       .then(() => setPrintStatus(undefined))
       .catch((error: unknown) => setPrintStatus(toPreviewError(error)));
+  });
+
+  downloadControl.addEventListener("click", () => {
+    downloadBookAdapter(editor.getSource());
+  });
+
+  loadControl.addEventListener("change", () => {
+    const file = loadControl.files?.[0];
+    // Cleared unconditionally so choosing the very same file again still fires a
+    // 'change' event -- the browser does not consider re-picking an unchanged
+    // value a change otherwise.
+    loadControl.value = "";
+    if (!file) return;
+
+    loadBookFileAdapter(file)
+      .then((source) => {
+        // Asked only now that the file is known to be a genuine book: an author
+        // who picks the wrong file entirely is told so without first being asked
+        // whether to discard their current work over it.
+        const proceed = window.confirm("Loading this file replaces the book you are currently editing. Continue?");
+        if (!proceed) return;
+
+        // A pending automatic repaint would otherwise still fire moments later
+        // on the source this load is about to replace.
+        clearScheduledRepaint();
+        editor.setSource(source);
+        requestRepaint(source);
+        // Both belonged to the book this load just replaced.
+        setPrintStatus(undefined);
+        setLoadStatus(undefined);
+      })
+      .catch((error: unknown) => setLoadStatus(toPreviewError(error)));
   });
 
   requestRepaint(initialSource);
