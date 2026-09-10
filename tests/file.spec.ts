@@ -85,6 +85,27 @@ test.describe("download and load a book", () => {
     expect(after).toBe(before);
   });
 
+  test("a JSON file carrying a source field but no format marker is still not a book", async ({ page }) => {
+    // #given: a book in progress, and another tool's JSON file that happens to have
+    // a top-level "source" string -- the shape check alone cannot tell it apart, so
+    // only the format marker stands between the author and a silent replacement
+    await replaceSource(page, "Distinctive text the author was in the middle of writing.");
+    const before = await page.evaluate(() => window.__editor?.getSource?.());
+
+    const dir = mkdtempSync(path.join(tmpdir(), "grimoire-lookalike-"));
+    const lookalikePath = path.join(dir, "some-other-tool.json");
+    writeFileSync(lookalikePath, JSON.stringify({ source: "print('hello from another tool')" }));
+
+    // #when: that file is loaded
+    await page.locator("#load").setInputFiles(lookalikePath);
+
+    // #then: the author is told, and the book they were writing is unchanged
+    await expect(page.locator("#status")).toBeVisible();
+    await expect.poll(() => page.locator("#status").textContent()).toContain("Loading file failed");
+    const after = await page.evaluate(() => window.__editor?.getSource?.());
+    expect(after).toBe(before);
+  });
+
   test("declining the confirmation leaves the current book exactly as it was", async ({ page }) => {
     // #given: a downloaded book, and newer work in the editor since then
     await replaceSource(page, SOURCE);
