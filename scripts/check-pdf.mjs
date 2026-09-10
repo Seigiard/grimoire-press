@@ -1,6 +1,7 @@
 // Prints a book through the real browser print engine so the resulting PDF can be
-// inspected: `pdftotext` must extract its text, and `pdffonts` must show every
-// typeface embedded rather than silently fallen back to a machine font.
+// inspected: `pdffonts` must show every typeface embedded rather than silently
+// fallen back to a machine font, and `pdftotext -bbox` must show the page the
+// author turned landscape printed on the book's own sheet lying the long way.
 //
 // This does not go through the preview's own pagination (Vivliostyle in a
 // CoreViewer, printed through @vivliostyle/core's printHTML) because that
@@ -43,6 +44,13 @@ import { createServer } from "vite";
 // without clashing with `npm run test:e2e`'s own dev server.
 const PORT = 5197;
 
+// The book is bound at one format, in millimetres, so the checks at the foot of
+// this file can say what a sheet of it measures without reading the size back out
+// of the markup that declared it.
+const SHEET_ACROSS_MM = 90;
+const SHEET_DOWN_MM = 160;
+const PT_PER_MM = 72 / 25.4;
+
 // Narrow on purpose (a bit narrower than a typical digest-sized book): wide
 // enough to read, narrow enough that the long compound words below cannot
 // help but wrap somewhere -- proof that "hyphens: auto" + lang="ru" is
@@ -72,8 +80,13 @@ const PORT = 5197;
 // font-style normal), so nothing in its CSS can ask for Alegreya italic at
 // 400. It ships anyway, because an author writing emphasis inside a heading
 // at any other weight would otherwise land back on a synthesised oblique.
+// The last block is a page turned landscape (issue #22): a wide table that needs
+// the long edge of the very sheet the book is bound at. It is here rather than in
+// a book of its own because "prints landscape" is a claim about one page among
+// pages that did not turn, and the same print run is what proves the rest of them
+// stayed upright.
 const RUSSIAN_BOOK = [
-  '<Book size="90mm 160mm" theme="default-ru">',
+  `<Book size="${SHEET_ACROSS_MM}mm ${SHEET_DOWN_MM}mm" theme="default-ru">`,
   '<Section columns="1">',
   "# Заголовок книги",
   "",
@@ -98,6 +111,13 @@ const RUSSIAN_BOOK = [
   "",
   "Текст второго раздела, чтобы бегущий заголовок сменился вместе с ним.",
   "</Section>",
+  '<Page orientation="landscape">',
+  "# Лист персонажа",
+  "",
+  "Широкая таблица, которой нужна длинная сторона листа, а не короткая: " +
+    "строка, набранная поперёк повёрнутого листа, шире всего того, что " +
+    "помещается на страницах вокруг неё.",
+  "</Page>",
   "</Book>",
 ].join("\n");
 
@@ -178,3 +198,88 @@ if (problems.length > 0) {
 }
 
 console.log(`\nEvery face embeds as an outline font (${new Set(faces.map((f) => f.name)).size} distinct).`);
+
+// The second check: a page an author turned prints turned (issue #22).
+//
+// Not readable from the printed page's own size. Vivliostyle's print path gives
+// the whole document a single square sheet big enough for the longest edge of any
+// page in it (measured: `@page {size: 454pt 454pt}` for this book) and draws each
+// page's own box inside it, which is how one printed file carries pages of two
+// shapes at all. Every PDF page therefore reports the same size, turned or not.
+//
+// What does distinguish them is where the text landed, which is what the author
+// actually gets: a line set across a turned sheet runs wider than an upright sheet
+// of this book is wide, and could not have been printed on one. So the oracle is
+// the spread of the words themselves, measured by `pdftotext -bbox` -- spreads,
+// not positions, because Chromium centres the document's sheet on whatever paper
+// it is printing to and the offset that adds is not part of the claim.
+let wordBoxes;
+try {
+  wordBoxes = execFileSync("pdftotext", ["-bbox", "/tmp/check.pdf", "-"], { encoding: "utf8" });
+} catch (error) {
+  console.error("pdftotext is required to check the printed PDF and is not available.");
+  console.error("Install poppler (macOS: `brew install poppler`), then run this again.");
+  console.error(String(error));
+  process.exit(1);
+}
+
+const WORD = /<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)"/;
+const printedPages = [];
+for (const line of wordBoxes.split("\n")) {
+  if (line.includes("<page ")) printedPages.push({ xMin: Infinity, xMax: -Infinity, yMin: Infinity, yMax: -Infinity });
+  const word = WORD.exec(line);
+  if (word === null || printedPages.length === 0) continue;
+  const [, xMin, yMin, xMax, yMax] = word.map(Number);
+  const spread = printedPages[printedPages.length - 1];
+  spread.xMin = Math.min(spread.xMin, xMin);
+  spread.xMax = Math.max(spread.xMax, xMax);
+  spread.yMin = Math.min(spread.yMin, yMin);
+  spread.yMax = Math.max(spread.yMax, yMax);
+}
+
+const across = SHEET_ACROSS_MM * PT_PER_MM;
+const down = SHEET_DOWN_MM * PT_PER_MM;
+// A point of slack: a glyph's inked bounding box is not its layout box, so a word
+// can report a hair outside the area it was set in.
+const SLACK_PT = 1;
+const spreads = printedPages.map((page, index) => ({
+  number: index + 1,
+  across: page.xMax > page.xMin ? page.xMax - page.xMin : 0,
+  down: page.yMax > page.yMin ? page.yMax - page.yMin : 0,
+}));
+const turnedPages = spreads.filter((page) => page.across > across + SLACK_PT);
+
+const printProblems = [];
+if (spreads.length === 0) {
+  printProblems.push("the PDF has no text on any page at all");
+}
+// The page is the last block of the book, so it is the last page of it.
+if (turnedPages.length !== 1 || turnedPages[0].number !== spreads.length) {
+  printProblems.push(
+    `expected the last page (${spreads.length}) alone to be set across a turned sheet, ` +
+      `but the pages set wider than ${across.toFixed(1)}pt were: ` +
+      (turnedPages.length === 0 ? "none" : turnedPages.map((p) => p.number).join(", ")),
+  );
+}
+for (const page of spreads) {
+  const turned = turnedPages.includes(page);
+  const sheet = turned ? { across: down, down: across } : { across, down };
+  if (page.across > sheet.across + SLACK_PT || page.down > sheet.down + SLACK_PT) {
+    printProblems.push(
+      `page ${page.number}'s text spreads ${page.across.toFixed(1)}x${page.down.toFixed(1)}pt, ` +
+        `which does not fit the ${turned ? "turned" : "upright"} sheet ` +
+        `(${sheet.across.toFixed(1)}x${sheet.down.toFixed(1)}pt)`,
+    );
+  }
+}
+
+if (printProblems.length > 0) {
+  console.error("\nThe printed PDF does not show the page the author turned printing turned:");
+  for (const problem of printProblems) console.error(`  ${problem}`);
+  process.exit(1);
+}
+
+console.log(
+  `The page turned landscape printed across the sheet ` +
+    `(${turnedPages[0].across.toFixed(1)}pt wide, on a book bound ${across.toFixed(1)}pt across).`,
+);

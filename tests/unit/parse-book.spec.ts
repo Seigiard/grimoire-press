@@ -50,6 +50,11 @@ describe("parseBook error paths", () => {
     expectMarkupErrorLine(source, 1);
   });
 
+  it("names the line of an invalid orientation attribute", () => {
+    const source = ['<Book size="A5">', '<Page orientation="sideways">', "A card.", "</Page>", "</Book>"].join("\n");
+    expectMarkupErrorLine(source, 2);
+  });
+
   it("names the line of an invalid columns attribute", () => {
     const source = ['<Book size="A5">', '<Section columns="two">', "Some prose.", "</Section>", "</Book>"].join("\n");
     expectMarkupErrorLine(source, 2);
@@ -429,5 +434,41 @@ describe("parseBook page vocabulary", () => {
         { kind: "prose", line: 7 },
       ],
     });
+  });
+});
+
+/**
+ * Issue #22's vocabulary: a page may declare which way its sheet lies. The consumer
+ * is render-book.ts, which composes the page's sheet from the book's own size and
+ * this word, and through it an author with a table too wide for the page. The
+ * observable failure is a declared orientation not reaching the parsed book at all,
+ * or a page that declared none arriving with one it never asked for -- which would
+ * give a plain page a sheet of its own to declare where it has nothing to say. The
+ * oracle is the fixture itself: the word this test wrote into the source.
+ */
+describe("parseBook page orientation", () => {
+  const orientationOf = (pageTag: string): string | undefined => {
+    const source = ['<Book size="A5">', pageTag, "A card.", "</Page>", "</Book>"].join("\n");
+    const [block] = parseBook(source).blocks;
+    if (block?.kind !== "page") throw new Error("the book's only block was not a page");
+    return block.orientation;
+  };
+
+  it("reads the orientation a page declares", () => {
+    // #given: a page turned each of the two ways the vocabulary knows
+    // #when: the book is parsed
+    // #then: the page carries the word the author wrote
+    expect({
+      landscape: orientationOf('<Page orientation="landscape">'),
+      portrait: orientationOf('<Page orientation="portrait">'),
+    }).toEqual({ landscape: "landscape", portrait: "portrait" });
+  });
+
+  it("leaves a page that declares no orientation without one", () => {
+    // #given: a page written exactly as it was before an orientation could be
+    // declared
+    // #when: the book is parsed
+    // #then: it declares nothing, rather than being given a default it never wrote
+    expect(orientationOf("<Page>")).toBeUndefined();
   });
 });
