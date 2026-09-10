@@ -50,9 +50,23 @@ produced two pages, both carrying the named page's own margin box. So "exactly o
 remains ours to check, by counting the pages the content occupied, exactly as decided
 before this measurement.
 
-The renderer emits the `position: relative` wrapper that makes `top`/`left` inside a page
-mean what the author expects. Leaving that to the author would make `Page` worth no more
-than a `div`.
+It gives us the frame of reference for free, and this record was wrong about how.
+
+We wrote here that the renderer would emit a `position: relative` wrapper to make
+`top`/`left` inside a page mean what the author expects. Measured while building the
+page, that wrapper is not needed and is actively harmful. The engine already makes the
+page area the containing block for absolutely positioned content on a named page.
+Interposing a wrapper of our own takes that away, because the wrapper is as tall as its
+content rather than as tall as the page: a box declared `bottom: 20mm` then lands 20mm
+below the top of the sheet instead of 20mm above its foot, `top: 50%` resolves against a
+box of no height, and a page opening with a heading drifts 5.67mm down as that heading's
+margin collapses through the wrapper -- the same margin-collapse trap this record
+describes above, reintroduced by the fix for it. Sizing the wrapper to the page would
+correct all three, and is exactly the hand-rolled canvas measured and rejected above.
+
+So the renderer emits the page name and nothing else. The frame of reference is the page
+area itself, which is what makes a `Page` worth more than a `div`: a `div` an author
+writes gets no sheet of its own to resolve against.
 
 ## Content pushed off the sheet is not reported
 

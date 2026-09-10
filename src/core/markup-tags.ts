@@ -1,11 +1,11 @@
 /**
- * Recognises the book's markup tags -- `<Book>`, `<Section>`, `<PageBreak />`,
- * `<ColumnBreak />` -- against a single source line. This is the one place that
- * decides what counts as one of the book's tags: `parse-book.ts` calls it to build a
- * book's structure, and the editor's CodeMirror extension (`adapters/markup-syntax.ts`)
- * calls it to highlight the same lines. Sharing this function is what the parent
- * issue means by "one grammar" -- highlighting cannot disagree with what a tag does,
- * because both read the same recognition rules.
+ * Recognises the book's markup tags -- `<Book>`, `<Section>`, `<Page>`,
+ * `<PageBreak />`, `<ColumnBreak />` -- against a single source line. This is the one
+ * place that decides what counts as one of the book's tags: `parse-book.ts` calls it
+ * to build a book's structure, and the editor's CodeMirror extension
+ * (`adapters/markup-syntax.ts`) calls it to highlight the same lines. Sharing this
+ * function is what the parent issue means by "one grammar" -- highlighting cannot
+ * disagree with what a tag does, because both read the same recognition rules.
  *
  * A tag occupies an entire line by itself; one that shares a line with prose is not
  * recognised as a tag; the tag-in-prose case is out of scope for this version.
@@ -20,6 +20,12 @@ const ATTR = /([A-Za-z]+)="([^"]*)"/g;
 const BOOK_CLOSE = /^<\/Book>$/;
 const SECTION_OPEN = /^<Section(?:\s+columns="([^"]*)")?\s*>$/;
 const SECTION_CLOSE = /^<\/Section>$/;
+// `<Page>` carries no attributes: a page declares no column count (it exists to
+// escape the flow a column count describes) and no size (a book is bound at one
+// format). Written to reject `<PageBreak />` by construction -- the `>` is
+// anchored straight after the name, so only the bare element matches.
+const PAGE_OPEN = /^<Page\s*>$/;
+const PAGE_CLOSE = /^<\/Page>$/;
 const PAGE_BREAK = /^<PageBreak\s*\/>$/;
 const COLUMN_BREAK = /^<ColumnBreak\s*\/>$/;
 const INDENTED = /^(?: {4}|\t)/;
@@ -28,13 +34,15 @@ const FENCE = /^(`{3,}|~{3,})/;
 // on its own line -- but not tied to any specific one of them. Used only to notice
 // when an author typed something tag-shaped that isn't in KNOWN_TAG_NAMES below.
 const ANY_TAG = /^<\/?([A-Z][A-Za-z0-9]*)(?:\s+[^>]*)?\s*\/?>$/;
-const KNOWN_TAG_NAMES = new Set(["Book", "Section", "PageBreak", "ColumnBreak"]);
+const KNOWN_TAG_NAMES = new Set(["Book", "Section", "Page", "PageBreak", "ColumnBreak"]);
 
 export type TagLine =
   | { readonly kind: "book-open"; readonly size: string | undefined; readonly theme: string | undefined }
   | { readonly kind: "book-close" }
   | { readonly kind: "section-open"; readonly columns: string | undefined }
   | { readonly kind: "section-close" }
+  | { readonly kind: "page-open" }
+  | { readonly kind: "page-close" }
   | { readonly kind: "page-break" }
   | { readonly kind: "column-break" };
 
@@ -72,6 +80,9 @@ export function matchTagLine(line: string): TagLine | undefined {
   const sectionOpen = SECTION_OPEN.exec(trimmed);
   if (sectionOpen) return { kind: "section-open", columns: sectionOpen[1] };
   if (SECTION_CLOSE.test(trimmed)) return { kind: "section-close" };
+
+  if (PAGE_OPEN.test(trimmed)) return { kind: "page-open" };
+  if (PAGE_CLOSE.test(trimmed)) return { kind: "page-close" };
 
   if (PAGE_BREAK.test(trimmed)) return { kind: "page-break" };
   if (COLUMN_BREAK.test(trimmed)) return { kind: "column-break" };
@@ -139,6 +150,10 @@ export function describeTag(kind: TagLine["kind"]): string {
       return "Section";
     case "section-close":
       return "/Section";
+    case "page-open":
+      return "Page";
+    case "page-close":
+      return "/Page";
     case "page-break":
       return "PageBreak";
     case "column-break":
