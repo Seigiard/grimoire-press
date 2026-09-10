@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // No "DOM": the compile itself fails if core so much as names a browser type,
+    // let alone calls one. This is what "the build fails if a browser reference is
+    // added" means mechanically (issue #2's acceptance criteria).
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "include": ["src/core"]
+}

@@ -1,0 +1,38 @@
+/* The editor shell, not the book's own look: the book's styling lives entirely in
+   the markup core renders, so it prints without a single rule from this file. */
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+#app {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
+}
+
+header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  font-family: system-ui, sans-serif;
+  border-bottom: 1px solid #ccc;
+}
+
+#editor,
+#preview {
+  overflow: auto;
+  min-height: 0;
+}
+
+#editor {
+  border-right: 1px solid #ccc;
+}
+
+#editor .cm-editor {
+  height: 100%;
+}

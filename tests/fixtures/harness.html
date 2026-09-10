@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>pagination test harness</title>
+  </head>
+  <body>
+    <div id="preview"></div>
+    <script type="module">
+      import { renderBook } from "/src/core/render-book.ts";
+      import { paginate } from "/src/adapters/pagination.ts";
+
+      // Exposes the exact core+adapter seam issue #2 asks the test to exercise:
+      // a book's source in, a real-engine page count out. Nothing here asserts
+      // anything about markup shape or about Vivliostyle's own correctness.
+      window.__paginateBook = async (source) => {
+        const html = renderBook({ source });
+        const container = document.getElementById("preview");
+        const { pageCount } = await paginate(container, html);
+        return pageCount;
+      };
+    </script>
+  </body>
+</html>
