@@ -66,10 +66,10 @@ declare global {
     __paginateBook: (source: string) => Promise<number>;
     __previewAfterEngineFailure: (goodSource: string, nextSource: string) => Promise<ContainerAfterFailure>;
     __previewAfterFirstEverEngineFailure: (source: string) => Promise<ContainerAfterFailure>;
-    __paginateAndInspect: (source: string) => Promise<PageInspection>;
+    __paginateAndInspect: (source: string, extraThemeCss?: string) => Promise<PageInspection>;
     __paginateAndMeasure: (source: string) => Promise<PageMeasurement>;
     __paginateAndReportOverflow: (source: string) => Promise<OverflowInspection>;
-    __paginateAndInspectHeaders: (source: string) => Promise<HeaderInspection[]>;
+    __paginateAndInspectHeaders: (source: string, extraThemeCss?: string) => Promise<HeaderInspection[]>;
     __inspectMarginBoxFonts: (source: string) => Promise<MarginBoxFontInspection>;
     __inspectFonts: (source: string, selectors: readonly string[]) => Promise<Record<string, string | undefined>>;
     __printTwiceSharesOneAttempt: (source: string) => boolean;

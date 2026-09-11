@@ -10,6 +10,7 @@
       import { renderBook } from "/src/core/render-book.ts";
       import { paginate } from "/src/adapters/pagination.ts";
       import { printBook } from "/src/adapters/printing.ts";
+      import { defaultRuTheme } from "/src/core/themes/default-ru/theme.ts";
 
       // Issue #6's print seam: two print requests made back-to-back, with no
       // await between them, so the second lands while the first is still in
@@ -69,6 +70,16 @@
       // innerHTML alone cannot see an attribute on the container itself.
       const readAttributes = (element) =>
         [...element.attributes].map((a) => `${a.name}=${a.value}`).sort().join("\n");
+
+      const renderWithExtraThemeCss = (source, extraThemeCss) => {
+        const html = renderBook({ source });
+        if (extraThemeCss === undefined) return html;
+
+        const themeStart = html.indexOf(defaultRuTheme.css);
+        if (themeStart === -1) throw new Error("the rendered book does not contain the default-ru Theme");
+        const themeEnd = themeStart + defaultRuTheme.css.length;
+        return `${html.slice(0, themeEnd)}\n${extraThemeCss}${html.slice(themeEnd)}`;
+      };
 
       const withUnloadableDocument = async (run) => {
         const native = URL.createObjectURL;
@@ -131,8 +142,8 @@
       // it with), plus the page count and each page's real rendered size. Tests read
       // these to assert column placement and forced breaks through actual
       // Vivliostyle layout, never by comparing against an expected markup string.
-      window.__paginateAndInspect = async (source) => {
-        const html = renderBook({ source });
+      window.__paginateAndInspect = async (source, extraThemeCss) => {
+        const html = renderWithExtraThemeCss(source, extraThemeCss);
         const container = document.getElementById("preview");
         const { pageCount, pageSizes } = await paginate(container, html);
 
@@ -176,8 +187,8 @@
       // `__paginateAndInspect` reads, Vivliostyle gives each page exactly one
       // `[data-vivliostyle-page-index]` ancestor, so no de-duplication is needed
       // here.
-      window.__paginateAndInspectHeaders = async (source) => {
-        const html = renderBook({ source });
+      window.__paginateAndInspectHeaders = async (source, extraThemeCss) => {
+        const html = renderWithExtraThemeCss(source, extraThemeCss);
         const container = document.getElementById("preview");
         await paginate(container, html);
 

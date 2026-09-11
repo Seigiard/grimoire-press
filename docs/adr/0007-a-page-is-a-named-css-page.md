@@ -76,6 +76,20 @@ So the renderer emits the page name and nothing else. The frame of reference is 
 area itself, which is what makes a `Page` worth more than a `div`: a `div` an author
 writes gets no sheet of its own to resolve against.
 
+## Page size stays with the Book
+
+A Theme may style page margin boxes and other visual properties through an unnamed or
+pseudo-page `@page` rule, but it may not bind the Book at another size. The renderer puts
+the visual fallbacks and Theme in one cascade layer, in that source order, while an
+earlier ownership layer holds important Book and oriented-Page size declarations.
+Important declarations reverse layer order, so Book geometry wins even when Theme CSS
+uses `!important` or a more-specific selector such as `@page :first`. Within the ownership
+layer, named-page specificity gives an oriented Page the Book's turned sheet.
+
+The layer is an ownership boundary, not only a convention for the current Theme. Theme
+CSS stays verbatim and keeps its ordinary cascade over fallback visual properties, but
+cannot create two sheet formats in one bound Book.
+
 ## Content pushed off the sheet is not reported
 
 Measured: content positioned past the page box is laid out, gets real coordinates, and is

@@ -108,10 +108,10 @@ const FONT_FACES = `
  * sits in the same display face as a heading, the page number in the same
  * body face as running text -- so this theme owns it exactly the way it
  * owns `h1`/`h2` and body typefaces below, rather than render-book.ts
- * hardcoding one look for every theme. render-book.ts's own `@page` block
- * only sets the plain-fallback face and size a themeless book keeps; this
- * `@page` block cascades on top of it by the same append-last rule as
- * every other themed CSS in this file.
+ * hardcoding one look for every theme. render-book.ts's first `@page` block
+ * sets the plain-fallback face a themeless book keeps; this `@page` block
+ * cascades on top of those fallback visual properties in their shared layer. The
+ * renderer's separate Book ownership layer does not compete with any property here.
  */
 const MARGIN_BOX_CSS = `
 @page {

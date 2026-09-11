@@ -52,9 +52,9 @@ const box = (measurement: PageMeasurement, key: string): PageBox => {
 // 2 <Section ...>     6 A card ...          9 Short prose after.
 // 3 Short prose ...   7 </Page>            10 </Section>
 // 4 </Section>                             11 </Book>
-const proseAroundACard = (size: string, pageTag: string): string =>
+const proseAroundACard = (size: string, pageTag: string, theme?: string): string =>
   [
-    `<Book size="${size}">`,
+    `<Book size="${size}"${theme === undefined ? "" : ` theme="${theme}"`}>`,
     '<Section columns="1">',
     "Short prose before the card.",
     "</Section>",
@@ -292,6 +292,44 @@ const turned = (sheet: { width: number; height: number }): { width: number; heig
 });
 
 test.describe("a page can be turned while the book keeps its one size", () => {
+  test("a theme cannot replace the book's sheet for sections or pages", async ({ page }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    // #given: an A5 book using a theme that tries to bind it at A4, strongly
+    // enough that source order alone cannot protect the book's declaration
+    const conflictingThemeCss = `
+      @page { size: A4 !important; }
+      @page :first { size: A4 !important; }
+    `;
+
+    // #when: the real engine paginates one ordinary page and one turned page
+    // under that theme, alongside the same book with no theme as the sheet oracle
+    const ordinary = await page.evaluate(
+      ({ source, css }) => window.__paginateAndInspect(source, css),
+      { source: proseAroundACard("A5", "<Page>", "default-ru"), css: conflictingThemeCss },
+    );
+    const landscape = await page.evaluate(
+      ({ source, css }) => window.__paginateAndInspect(source, css),
+      { source: proseAroundACard("A5", '<Page orientation="landscape">', "default-ru"), css: conflictingThemeCss },
+    );
+    const bookAlone = await page.evaluate((source) => window.__paginateAndInspect(source), proseOnly("A5"));
+
+    // #then: sections and an ordinary page use the Book sheet, while the
+    // landscape page uses that same sheet turned, never the Theme's A4 sheet
+    const sheet = sheetOf(bookAlone, 0);
+    expect({
+      ordinarySection: sheetForLine(ordinary, 3),
+      ordinaryPage: sheetForLine(ordinary, 5),
+      landscapeSection: sheetForLine(landscape, 3),
+      landscapePage: sheetForLine(landscape, 5),
+    }).toEqual({
+      ordinarySection: sheet,
+      ordinaryPage: sheet,
+      landscapeSection: sheet,
+      landscapePage: turned(sheet),
+    });
+  });
+
   test("a landscape page reports the book's own sheet turned, and the pages around it report it upright", async ({
     page,
   }) => {
@@ -418,6 +456,22 @@ const HEADED_CHAPTERS_AROUND_A_CARD = [
 const cardPageIndex = (measured: PageMeasurement): number => box(measured, `line-${CARD_LINE}`).pageIndex;
 
 test.describe("a page carries no running header", () => {
+  test("a theme cannot put a running header back on a page", async ({ page }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    const headers = await page.evaluate(
+      ({ source, css }) => window.__paginateAndInspectHeaders(source, css),
+      {
+        source: proseAroundACard("A5", "<Page>", "default-ru"),
+        css: '@page { @top-center { content: "Theme header" !important; } }',
+      },
+    );
+
+    // The surrounding Section pages prove the injected Theme rule was active;
+    // the Page between them still owns its absence of a running header.
+    expect(headers.map((page) => page.header)).toEqual(["Theme header", undefined, "Theme header"]);
+  });
+
   test("the pages around a page name the chapter the reader is in, and the page itself names nothing", async ({
     page,
   }) => {
