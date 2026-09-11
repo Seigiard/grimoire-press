@@ -71,6 +71,16 @@
       const readAttributes = (element) =>
         [...element.attributes].map((a) => `${a.name}=${a.value}`).sort().join("\n");
 
+      const renderWithExtraThemeCss = (source, extraThemeCss) => {
+        const html = renderBook({ source });
+        if (extraThemeCss === undefined) return html;
+
+        const themeStart = html.indexOf(defaultRuTheme.css);
+        if (themeStart === -1) throw new Error("the rendered book does not contain the default-ru Theme");
+        const themeEnd = themeStart + defaultRuTheme.css.length;
+        return `${html.slice(0, themeEnd)}\n${extraThemeCss}${html.slice(themeEnd)}`;
+      };
+
       const withUnloadableDocument = async (run) => {
         const native = URL.createObjectURL;
         URL.createObjectURL = () => `blob:${location.origin}/a-blob-url-that-resolves-to-nothing`;
@@ -133,14 +143,7 @@
       // these to assert column placement and forced breaks through actual
       // Vivliostyle layout, never by comparing against an expected markup string.
       window.__paginateAndInspect = async (source, extraThemeCss) => {
-        const themeCss = defaultRuTheme.css;
-        if (extraThemeCss !== undefined) defaultRuTheme.css += `\n${extraThemeCss}`;
-        let html;
-        try {
-          html = renderBook({ source });
-        } finally {
-          defaultRuTheme.css = themeCss;
-        }
+        const html = renderWithExtraThemeCss(source, extraThemeCss);
         const container = document.getElementById("preview");
         const { pageCount, pageSizes } = await paginate(container, html);
 
@@ -184,8 +187,8 @@
       // `__paginateAndInspect` reads, Vivliostyle gives each page exactly one
       // `[data-vivliostyle-page-index]` ancestor, so no de-duplication is needed
       // here.
-      window.__paginateAndInspectHeaders = async (source) => {
-        const html = renderBook({ source });
+      window.__paginateAndInspectHeaders = async (source, extraThemeCss) => {
+        const html = renderWithExtraThemeCss(source, extraThemeCss);
         const container = document.getElementById("preview");
         await paginate(container, html);
 

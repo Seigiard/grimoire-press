@@ -52,9 +52,9 @@ const box = (measurement: PageMeasurement, key: string): PageBox => {
 // 2 <Section ...>     6 A card ...          9 Short prose after.
 // 3 Short prose ...   7 </Page>            10 </Section>
 // 4 </Section>                             11 </Book>
-const proseAroundACard = (size: string, pageTag: string): string =>
+const proseAroundACard = (size: string, pageTag: string, theme?: string): string =>
   [
-    `<Book size="${size}">`,
+    `<Book size="${size}"${theme === undefined ? "" : ` theme="${theme}"`}>`,
     '<Section columns="1">',
     "Short prose before the card.",
     "</Section>",
@@ -271,9 +271,6 @@ const proseOnly = (size: string): string =>
     "\n",
   );
 
-const themedProseAroundACard = (pageTag: string): string =>
-  proseAroundACard("A5", pageTag).replace('<Book size="A5">', '<Book size="A5" theme="default-ru">');
-
 const sheetOf = (inspection: PageInspection, pageIndex: number): { width: number; height: number } => {
   const found = inspection.pageSizes[pageIndex];
   if (found === undefined) throw new Error(`the engine reported no page ${pageIndex}`);
@@ -309,11 +306,11 @@ test.describe("a page can be turned while the book keeps its one size", () => {
     // under that theme, alongside the same book with no theme as the sheet oracle
     const ordinary = await page.evaluate(
       ({ source, css }) => window.__paginateAndInspect(source, css),
-      { source: themedProseAroundACard("<Page>"), css: conflictingThemeCss },
+      { source: proseAroundACard("A5", "<Page>", "default-ru"), css: conflictingThemeCss },
     );
     const landscape = await page.evaluate(
       ({ source, css }) => window.__paginateAndInspect(source, css),
-      { source: themedProseAroundACard('<Page orientation="landscape">'), css: conflictingThemeCss },
+      { source: proseAroundACard("A5", '<Page orientation="landscape">', "default-ru"), css: conflictingThemeCss },
     );
     const bookAlone = await page.evaluate((source) => window.__paginateAndInspect(source), proseOnly("A5"));
 
@@ -459,6 +456,22 @@ const HEADED_CHAPTERS_AROUND_A_CARD = [
 const cardPageIndex = (measured: PageMeasurement): number => box(measured, `line-${CARD_LINE}`).pageIndex;
 
 test.describe("a page carries no running header", () => {
+  test("a theme cannot put a running header back on a page", async ({ page }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    const headers = await page.evaluate(
+      ({ source, css }) => window.__paginateAndInspectHeaders(source, css),
+      {
+        source: proseAroundACard("A5", "<Page>", "default-ru"),
+        css: '@page { @top-center { content: "Theme header" !important; } }',
+      },
+    );
+
+    // The surrounding Section pages prove the injected Theme rule was active;
+    // the Page between them still owns its absence of a running header.
+    expect(headers.map((page) => page.header)).toEqual(["Theme header", undefined, "Theme header"]);
+  });
+
   test("the pages around a page name the chapter the reader is in, and the page itself names nothing", async ({
     page,
   }) => {
