@@ -33,6 +33,7 @@ export default tseslint.config(
         "error",
         {
           default: "disallow",
+          checkAllOrigins: true,
           policies: [
             { from: { element: { type: "core" } }, allow: { to: { element: { type: "core" } } } },
             {
@@ -42,6 +43,23 @@ export default tseslint.config(
             {
               from: { element: { type: "app" } },
               allow: { to: { element: { types: ["app", "adapters", "core"] } } },
+            },
+            {
+              from: { element: { type: "core" } },
+              disallow: { to: { module: { origin: "external" } } },
+              message: "Core cannot import external package '{{dependency.source}}'; add only reviewed DOM-free packages",
+            },
+            {
+              from: { element: { type: "core" } },
+              allow: { to: { module: { origin: "external", source: "marked" } } },
+            },
+            {
+              from: { element: { types: ["adapters", "app"] } },
+              allow: { to: { module: { origin: "external" } } },
+            },
+            {
+              from: { element: { types: ["core", "adapters", "app"] } },
+              allow: { to: { module: { origin: "core" } } },
             },
           ],
         },

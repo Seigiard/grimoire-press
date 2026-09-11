@@ -34,3 +34,9 @@ A one-press download stays available later through a server that loads the same 
 Playwright and calls `page.pdf()`. That is only possible while pagination is driven by the
 book's own markup and stylesheet. Nothing in the editor's own page structure may take
 part in laying out a book, or that route closes.
+
+Code under `src/core` therefore cannot refer directly to browser globals and may import
+only external packages that have been reviewed as DOM-free. The DOM-less core TypeScript
+configuration and restricted-globals lint rule enforce the first constraint; the
+external-package allowlist in the boundaries lint rule enforces the second. Adapters and
+app code may use browser-bound packages because they sit outside the server-callable core.
