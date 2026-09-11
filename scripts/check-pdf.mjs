@@ -1,7 +1,8 @@
 // Prints a book through the real browser print engine so the resulting PDF can be
 // inspected: `pdffonts` must show every typeface embedded rather than silently
 // fallen back to a machine font, and `pdftotext -bbox` must show the page the
-// author turned landscape printed on the book's own sheet lying the long way.
+// author turned landscape printed on the book's own sheet lying the long way, with
+// no running header over it and its page number under it.
 //
 // This does not go through the preview's own pagination (Vivliostyle in a
 // CoreViewer, printed through @vivliostyle/core's printHTML) because that
@@ -84,11 +85,22 @@ const PT_PER_MM = 72 / 25.4;
 // the long edge of the very sheet the book is bound at. It is here rather than in
 // a book of its own because "prints landscape" is a claim about one page among
 // pages that did not turn, and the same print run is what proves the rest of them
-// stayed upright.
+// stayed upright. The same page is what the third check reads, for the same reason:
+// "carries no running header" (issue #21) is a claim about one page among pages
+// that carry one, and it opens with a heading of its own so that a header printed
+// over it would have something to say.
+// The three headings, named here because the running header the printed file is
+// checked for below is the heading of the part of the book the reader is in -- so
+// the check compares the printed margin box against the very words this script
+// wrote, not against a string it would otherwise have to repeat.
+const FIRST_HEADING = "Заголовок книги";
+const SECOND_HEADING = "Второй раздел *и продолжение*";
+const CARD_HEADING = "Лист персонажа";
+
 const RUSSIAN_BOOK = [
   `<Book size="${SHEET_ACROSS_MM}mm ${SHEET_DOWN_MM}mm" theme="default-ru">`,
   '<Section columns="1">',
-  "# Заголовок книги",
+  `# ${FIRST_HEADING}`,
   "",
   "Это обычный русский текст с достаточным количеством слов, чтобы перенос строк " +
     "стал заметен на узкой колонке: длинные слова вроде " +
@@ -107,17 +119,22 @@ const RUSSIAN_BOOK = [
   "",
   "<PageBreak />",
   "",
-  "# Второй раздел *и продолжение*",
-  "",
-  "Текст второго раздела, чтобы бегущий заголовок сменился вместе с ним.",
+  "Продолжение первой главы на следующей странице, чтобы её бегущий заголовок " +
+    "встретился не на одной странице, а повторился на каждой.",
   "</Section>",
   '<Page orientation="landscape">',
-  "# Лист персонажа",
+  `# ${CARD_HEADING}`,
   "",
   "Широкая таблица, которой нужна длинная сторона листа, а не короткая: " +
     "строка, набранная поперёк повёрнутого листа, шире всего того, что " +
     "помещается на страницах вокруг неё.",
   "</Page>",
+  '<Section columns="1">',
+  `# ${SECOND_HEADING}`,
+  "",
+  "Текст второго раздела, который идёт после листа персонажа: глава " +
+    "продолжается за ним, и её бегущий заголовок должен вернуться.",
+  "</Section>",
   "</Book>",
 ].join("\n");
 
@@ -223,18 +240,24 @@ try {
   process.exit(1);
 }
 
-const WORD = /<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)"/;
+// Every word the printed file carries, with its box and its text, grouped by the
+// page it was printed on. Both checks below read this: the second measures how far
+// the words on a page spread, the third reads which words landed in the band above
+// the text and which in the band below it.
+const WORD = /<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([^<]*)<\/word>/;
 const printedPages = [];
 for (const line of wordBoxes.split("\n")) {
-  if (line.includes("<page ")) printedPages.push({ xMin: Infinity, xMax: -Infinity, yMin: Infinity, yMax: -Infinity });
+  if (line.includes("<page ")) printedPages.push([]);
   const word = WORD.exec(line);
   if (word === null || printedPages.length === 0) continue;
-  const [, xMin, yMin, xMax, yMax] = word.map(Number);
-  const spread = printedPages[printedPages.length - 1];
-  spread.xMin = Math.min(spread.xMin, xMin);
-  spread.xMax = Math.max(spread.xMax, xMax);
-  spread.yMin = Math.min(spread.yMin, yMin);
-  spread.yMax = Math.max(spread.yMax, yMax);
+  const [, xMin, yMin, xMax, yMax, text] = word;
+  printedPages[printedPages.length - 1].push({
+    xMin: Number(xMin),
+    yMin: Number(yMin),
+    xMax: Number(xMax),
+    yMax: Number(yMax),
+    text,
+  });
 }
 
 const across = SHEET_ACROSS_MM * PT_PER_MM;
@@ -242,10 +265,10 @@ const down = SHEET_DOWN_MM * PT_PER_MM;
 // A point of slack: a glyph's inked bounding box is not its layout box, so a word
 // can report a hair outside the area it was set in.
 const SLACK_PT = 1;
-const spreads = printedPages.map((page, index) => ({
+const spreads = printedPages.map((words, index) => ({
   number: index + 1,
-  across: page.xMax > page.xMin ? page.xMax - page.xMin : 0,
-  down: page.yMax > page.yMin ? page.yMax - page.yMin : 0,
+  across: words.length === 0 ? 0 : Math.max(...words.map((w) => w.xMax)) - Math.min(...words.map((w) => w.xMin)),
+  down: words.length === 0 ? 0 : Math.max(...words.map((w) => w.yMax)) - Math.min(...words.map((w) => w.yMin)),
 }));
 const turnedPages = spreads.filter((page) => page.across > across + SLACK_PT);
 
@@ -253,11 +276,19 @@ const printProblems = [];
 if (spreads.length === 0) {
   printProblems.push("the PDF has no text on any page at all");
 }
-// The page is the last block of the book, so it is the last page of it.
-if (turnedPages.length !== 1 || turnedPages[0].number !== spreads.length) {
+// Which printed page is the author's own is read from what it says, not from where
+// it sits: the page carries the heading it opens with, and nothing else in the book
+// does. Counting to a position would make this check agree with itself about where
+// the page landed, and where it landed is part of what is being checked.
+const cardWords = CARD_HEADING.toUpperCase().split(" ");
+const turnedByText = printedPages.findIndex((words) =>
+  cardWords.every((wanted) => words.some((word) => word.text.toUpperCase() === wanted)),
+);
+if (turnedPages.length !== 1 || turnedByText === -1 || turnedPages[0].number !== turnedByText + 1) {
   printProblems.push(
-    `expected the last page (${spreads.length}) alone to be set across a turned sheet, ` +
-      `but the pages set wider than ${across.toFixed(1)}pt were: ` +
+    `expected the page carrying "${CARD_HEADING}" (printed page ` +
+      `${turnedByText === -1 ? "not found" : turnedByText + 1}) alone to be set across a turned ` +
+      `sheet, but the pages set wider than ${across.toFixed(1)}pt were: ` +
       (turnedPages.length === 0 ? "none" : turnedPages.map((p) => p.number).join(", ")),
   );
 }
@@ -282,4 +313,139 @@ if (printProblems.length > 0) {
 console.log(
   `The page turned landscape printed across the sheet ` +
     `(${turnedPages[0].across.toFixed(1)}pt wide, on a book bound ${across.toFixed(1)}pt across).`,
+);
+
+// The third check: the page carries no running header, and keeps its number
+// (issue #21). A running header names where the reader is in the flow; a page has
+// left the flow, so the chapter the author was writing around it must not be printed
+// over it -- nor must the page's own heading, which would name the reader's place no
+// better.
+//
+// The oracle is where the words landed and what they say. A running header is the
+// text set in the top margin, above everything else on its page, and it says the
+// heading of the part of the book that page belongs to -- one of the two this file
+// wrote into the source. The page sits between those two chapters, so the pages
+// before it are asked for the first chapter's heading and the pages after it for the
+// second one's, each in its own place rather than merely somewhere: a renderer that
+// printed the right two headings in the wrong order would satisfy "both were
+// printed" and still be wrong. The page itself is asked for nothing at all in the
+// band those lines occupy. The page number is read the same way from the other end:
+// the bottom line of every page, the page's own, must be its position in the file.
+const LINE_SLACK_PT = 1;
+
+/** The words of one printed page, gathered into lines by their top edge: words set
+ * on one line share it, and pdftotext reports each word's own box. */
+const linesOf = (words) => {
+  const lines = [];
+  for (const word of [...words].sort((a, b) => a.yMin - b.yMin || a.xMin - b.xMin)) {
+    const line = lines[lines.length - 1];
+    if (line !== undefined && Math.abs(word.yMin - line.yMin) <= LINE_SLACK_PT) {
+      line.yMax = Math.max(line.yMax, word.yMax);
+      line.words.push(word.text);
+    } else {
+      lines.push({ yMin: word.yMin, yMax: word.yMax, words: [word.text] });
+    }
+  }
+  return lines.map((line) => ({ yMin: line.yMin, yMax: line.yMax, text: line.words.join(" ") }));
+};
+
+/** What a heading looks like once it is a running header: the theme sets margin
+ * boxes in capitals, and `string-set` captures a heading's rendered text, so the
+ * emphasis markers an author wrote are not part of it. Compared in capitals at both
+ * ends, so this stays a claim about the words rather than about the theme's
+ * `text-transform`. */
+const asHeader = (heading) => heading.replaceAll("*", "").toUpperCase();
+
+const pageLines = printedPages.map(linesOf);
+const headerProblems = [];
+if (pageLines.length < 2 || pageLines.some((lines) => lines.length === 0)) {
+  headerProblems.push(`expected a printed book of several pages, all with text on them, and got ${pageLines.length}`);
+}
+
+// Which printed page is the author's own is asked of the file rather than counted
+// to: it is the one carrying the heading the page opens with. Counting to it would
+// make this check agree with itself about where the page went, which is one of the
+// things it is here to find out.
+const cardHeader = asHeader(CARD_HEADING);
+const cardIndex = pageLines.findIndex((lines) => lines.some((line) => line.text.toUpperCase() === cardHeader));
+if (cardIndex === -1) {
+  headerProblems.push(`no printed page carries the heading the page opens with, "${cardHeader}"`);
+}
+const thePage = pageLines[cardIndex] ?? [];
+const printedHeaders = [
+  ...pageLines.slice(0, Math.max(cardIndex, 0)).map((lines, index) => ({
+    number: index + 1,
+    line: lines[0],
+    chapter: asHeader(FIRST_HEADING),
+  })),
+  ...pageLines.slice(cardIndex + 1).map((lines, index) => ({
+    number: cardIndex + 2 + index,
+    line: lines[0],
+    chapter: asHeader(SECOND_HEADING),
+  })),
+];
+
+// A page with no chapter on one side of it cannot say whether the header came back
+// after the page, which is half of what "the pages around it keep theirs" claims.
+const before = cardIndex;
+const after = pageLines.length - cardIndex - 1;
+if (cardIndex !== -1 && (before === 0 || after === 0)) {
+  headerProblems.push(
+    `the printed page is not between chapters: ${before} page(s) before it and ${after} after, ` +
+      `so one side of "the pages around it keep their header" is not being read`,
+  );
+}
+
+for (const { number, line, chapter } of printedHeaders) {
+  if (line === undefined || line.text.toUpperCase() !== chapter) {
+    headerProblems.push(
+      `page ${number} is headed "${line?.text ?? ""}", not "${chapter}", so its running ` +
+        `header does not name the chapter that page belongs to`,
+    );
+  }
+}
+
+const headerBandFoot = Math.max(...printedHeaders.map(({ line }) => line?.yMax ?? -Infinity));
+const intruders = thePage.filter((line) => line.yMin < headerBandFoot);
+if (intruders.length > 0) {
+  headerProblems.push(
+    `the page is printed with ${intruders.length} line(s) in the band its neighbours' ` +
+      `running headers occupy (down to ${headerBandFoot.toFixed(1)}pt): ` +
+      intruders.map((line) => `"${line.text}" at ${line.yMin.toFixed(1)}pt`).join(", "),
+  );
+}
+// The band above is a claim about where words landed, and it reads the page against
+// neighbours of a different shape printed on the same sheet. This second claim needs
+// no geometry at all: a running header on this page would repeat the heading the page
+// opens with, because the page's own heading reassigns `current-heading` (issue #18).
+// So that heading appearing twice is the header, wherever on the sheet it landed --
+// and appearing no times is a page that printed nothing, which would satisfy "nothing
+// in the header band" for the wrong reason.
+const cardHeadings = thePage.filter((line) => line.text.toUpperCase() === cardHeader);
+if (cardIndex !== -1 && cardHeadings.length !== 1) {
+  headerProblems.push(
+    `the page prints the heading it opens with ${cardHeadings.length} time(s) rather than once: ` +
+      cardHeadings.map((line) => `"${line.text}" at ${line.yMin.toFixed(1)}pt`).join(", "),
+  );
+}
+
+// The address at the foot of each page, the page's own included.
+const printedNumbers = pageLines.map((lines) => lines[lines.length - 1]?.text);
+const expectedNumbers = pageLines.map((_, index) => String(index + 1));
+if (printedNumbers.join(" ") !== expectedNumbers.join(" ")) {
+  headerProblems.push(
+    `the pages are not numbered ${expectedNumbers.join(", ")} at their feet, but ` +
+      `${printedNumbers.map((text) => `"${text ?? ""}"`).join(", ")}`,
+  );
+}
+
+if (headerProblems.length > 0) {
+  console.error("\nThe printed PDF does not show a page free of the running header its neighbours carry:");
+  for (const problem of headerProblems) console.error(`  ${problem}`);
+  process.exit(1);
+}
+
+console.log(
+  `The page prints no running header where the ${before} page(s) of the chapter before it and ` +
+    `the ${after} after it print theirs, and it is numbered ${printedNumbers[cardIndex]} at its foot.`,
 );

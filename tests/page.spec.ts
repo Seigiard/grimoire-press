@@ -380,3 +380,92 @@ test.describe("a page can be turned while the book keeps its one size", () => {
     }).toEqual({ before: sheet, theCard: turned(sheet), after: sheet });
   });
 });
+
+// --- A page between two headed chapters ----------------------------------------
+// A chapter with a heading on either side, each long enough to run to more than one
+// page, so "the pages before and after carry theirs" is a claim about several pages
+// rather than about the one page that happens to touch the card. The card carries a
+// heading of its own: a page with nothing to name would prove nothing, since a
+// running header with no heading to show is empty anyway.
+//  1 <Book size="A5">                18 <Page>
+//  2 <Section columns="1">           19 # Character sheet
+//  3 # The first chapter             20 (blank)
+//  4 (blank)                         21 Name, look, and three moves.
+//  5..16 six paragraphs and blanks   22 </Page>
+// 17 </Section>                      23 <Section columns="1">
+//                                    24 # The second chapter
+//                                    25 (blank)
+//                                    26..37 six paragraphs and blanks
+//                                    38 </Section>   39 </Book>
+const FIRST_HEADING = "The first chapter";
+const SECOND_HEADING = "The second chapter";
+const CARD_LINE = 18;
+const HEADED_CHAPTERS_AROUND_A_CARD = [
+  '<Book size="A5">',
+  ...chapter([`# ${FIRST_HEADING}`, "", ...prose(1, 6)]),
+  "<Page>",
+  "# Character sheet",
+  "",
+  "Name, look, and three moves.",
+  "</Page>",
+  ...chapter([`# ${SECOND_HEADING}`, "", ...prose(20, 6)]),
+  "</Book>",
+].join("\n");
+
+/** The sheet the card landed on, asked of the engine rather than predicted here:
+ * which page a chapter of prose runs to is the engine's business, and this file only
+ * needs to know which of the pages it produced is the author's page. */
+const cardPageIndex = (measured: PageMeasurement): number => box(measured, `line-${CARD_LINE}`).pageIndex;
+
+test.describe("a page carries no running header", () => {
+  test("the pages around a page name the chapter the reader is in, and the page itself names nothing", async ({
+    page,
+  }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    // #given: a character sheet between two headed chapters
+    // #when: the real engine paginates it and resolves each page's margin boxes
+    const headers = await page.evaluate(
+      (source) => window.__paginateAndInspectHeaders(source),
+      HEADED_CHAPTERS_AROUND_A_CARD,
+    );
+    const measured = await page.evaluate(
+      (source) => window.__paginateAndMeasure(source),
+      HEADED_CHAPTERS_AROUND_A_CARD,
+    );
+
+    // The claim is about neighbours on both sides, so the fixture has to have some.
+    const card = cardPageIndex(measured);
+    expect(card).toBeGreaterThan(0);
+    expect(headers.length - card - 1).toBeGreaterThan(0);
+
+    // #then: every page of the chapter before the card is headed with that chapter,
+    // every page of the chapter after it with that one, and the card's own page
+    // carries no running header at all -- not even the heading it opens with
+    expect({
+      before: headers.slice(0, card).map((p) => p.header),
+      theCard: headers[card]!.header,
+      after: headers.slice(card + 1).map((p) => p.header),
+    }).toEqual({
+      before: Array.from({ length: card }, () => FIRST_HEADING),
+      theCard: undefined,
+      after: Array.from({ length: headers.length - card - 1 }, () => SECOND_HEADING),
+    });
+  });
+
+  test("the page still carries its number, and the numbering runs through it", async ({ page }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    // #given: the same character sheet between two headed chapters
+    // #when: the real engine paginates it and resolves each page's own counter
+    const headers = await page.evaluate(
+      (source) => window.__paginateAndInspectHeaders(source),
+      HEADED_CHAPTERS_AROUND_A_CARD,
+    );
+
+    // #then: every page prints its own position among the pages the engine produced,
+    // the card's included -- an address the reader can be pointed at, and one the
+    // page after the card carries on from rather than repeating or skipping
+    expect(headers.map((p) => p.pageNumber)).toEqual(headers.map((_, index) => String(index + 1)));
+  });
+});
