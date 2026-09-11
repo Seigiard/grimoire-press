@@ -60,6 +60,8 @@ set a Russian book.
 
 A book names one theme.
 
+A theme does not choose or override page size. Page size belongs to the book.
+
 ## Component
 
 A named block an author uses instead of describing its arrangement each time: a move, a
