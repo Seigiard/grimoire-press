@@ -70,20 +70,26 @@ export function renderBook(book: Book): string {
     @top-center { content: string(current-heading); }
     @bottom-center { content: counter(page); }
   }
-  /* Running header mechanics (issue #5): string-set captures the nearest
-     preceding heading's text into a page-scoped named string; @top-center
-     above reads it back. This is what CONTEXT.md's Section is short of on
-     its own -- a Section only declares column count, never a title -- so
-     the running header follows the heading structure an author already
-     writes instead of a second, parallel place to name a section. h1/h2
-     only: a referee's cheat sheet (the first payload, per issue #1's
-     "Further Notes") runs one or two heading levels deep, and a running
-     header that rewrote itself on every h3/h4 subheading would be noise,
-     not a location aid. Nothing for an author to declare or get wrong here
-     -- unlike every other attribute in this file, this is derived, not
-     declared, so parse-book.ts gains no new vocabulary and no new
-     MarkupError case for it. */
-  h1, h2 { string-set: current-heading content(); }
+  /* Running header mechanics (issues #5 and #18): string-set captures the
+     nearest preceding structural heading's text into a page-scoped named
+     string; @top-center above reads it back. The prose renderer marks only
+     headings produced from Markdown, distinguishing the book's structure
+     from raw HTML captions. Scoping those marks to section also keeps a
+     Page's headings from changing the running string after that Page has
+     left the flow (CONTEXT.md).
+
+     This is what CONTEXT.md's Section is short of on its own -- a Section
+     only declares column count, never a title -- so the running header
+     follows the heading structure an author already writes instead of a
+     second, parallel place to name a section. h1/h2 only: a referee's cheat
+     sheet (the first payload, per issue #1's "Further Notes") runs one or
+     two heading levels deep, and a running header that rewrote itself on
+     every h3/h4 subheading would be noise, not a location aid. Nothing for
+     an author to declare or get wrong here -- unlike every other attribute
+     in this file, this is derived, not declared, so parse-book.ts gains no
+     new vocabulary and no new MarkupError case for it. */
+  section h1[data-grimoire-structural-heading],
+  section h2[data-grimoire-structural-heading] { string-set: current-heading content(); }
   /* Hyphenation is a document-language concern, not a theme one -- CONTEXT.md
      keeps the two separate ("the language attribute switches hyphenation").
      Scoped to "ru" because that is the one case verified through the real

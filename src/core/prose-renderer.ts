@@ -70,7 +70,8 @@ class LineTrackingRenderer extends marked.Renderer {
     return this.tag(token, super.paragraph(token));
   }
   override heading(token: Tokens.Heading): string {
-    return this.tag(token, super.heading(token));
+    const html = super.heading(token).replace(/^<h([1-6])/, '<h$1 data-grimoire-structural-heading');
+    return this.tag(token, html);
   }
   override list(token: Tokens.List): string {
     return this.tag(token, super.list(token));

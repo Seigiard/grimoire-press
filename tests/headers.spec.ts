@@ -23,6 +23,40 @@ const TWO_HEADINGS_BOOK = [
   "</Book>",
 ].join("\n");
 
+const RAW_HEADING_IN_A_SECTION = [
+  '<Book size="A5">',
+  '<Section columns="1">',
+  "# The chapter",
+  "",
+  "Prose before the character-sheet fragment.",
+  "<PageBreak />",
+  "<h1>Character Sheet</h1>",
+  "Prose after the first character-sheet caption.",
+  "<PageBreak />",
+  "<h2>Read the Situation</h2>",
+  "Prose after the second character-sheet caption.",
+  "</Section>",
+  "</Book>",
+].join("\n");
+
+const PAGE_HEADING_BEFORE_UNHEADED_PROSE = [
+  '<Book size="A5">',
+  '<Section columns="1">',
+  "# The preceding chapter",
+  "",
+  "Prose before the character sheet.",
+  "</Section>",
+  "<Page>",
+  "## Character sheet",
+  "",
+  "<h2>Read the Situation</h2>",
+  "</Page>",
+  '<Section columns="1">',
+  "The next section starts with prose rather than a heading.",
+  "</Section>",
+  "</Book>",
+].join("\n");
+
 /**
  * Consumer: a reader who opens the printed or previewed book partway through
  * and relies on the running header to tell which part of the book they are
@@ -52,6 +86,28 @@ test.describe("running headers and page numbers", () => {
     expect(pages[0]!.header).toBe("First Section");
     expect(pages[1]!.header).toBe("First Section");
     expect(pages[pages.length - 1]!.header).toBe("Second Section");
+  });
+
+  test("a raw HTML heading inside a section does not replace its structural Markdown heading", async ({ page }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    const pages = await page.evaluate(
+      (source) => window.__paginateAndInspectHeaders(source),
+      RAW_HEADING_IN_A_SECTION,
+    );
+
+    expect(pages.map((p) => p.header)).toEqual(["The chapter", "The chapter", "The chapter"]);
+  });
+
+  test("headings inside a page do not leak into a later section that starts with prose", async ({ page }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    const pages = await page.evaluate(
+      (source) => window.__paginateAndInspectHeaders(source),
+      PAGE_HEADING_BEFORE_UNHEADED_PROSE,
+    );
+
+    expect(pages.map((p) => p.header)).toEqual(["The preceding chapter", undefined, "The preceding chapter"]);
   });
 
   test("each page's printed page number matches its real position among the pages Vivliostyle produced", async ({
