@@ -28,6 +28,12 @@ describe("core dependency boundary", () => {
     expect(messages[0]?.message).toContain("@vivliostyle/core");
   });
 
+  it("allows a reviewed DOM-free package from core", async () => {
+    const source = 'import { marked } from "marked";\nexport const rendered = marked("Text");';
+
+    await expect(lintAs("src/core/probe-guard.ts", source)).resolves.toEqual([]);
+  });
+
   it.each(["src/adapters/probe-guard.ts", "src/app/probe-guard.ts"])("allows the same package from %s", async (filePath) => {
     await expect(lintAs(filePath)).resolves.toEqual([]);
   });
