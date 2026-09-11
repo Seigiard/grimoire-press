@@ -119,9 +119,8 @@ const RUSSIAN_BOOK = [
   "",
   "<PageBreak />",
   "",
-  `# ${SECOND_HEADING}`,
-  "",
-  "Текст второго раздела, чтобы бегущий заголовок сменился вместе с ним.",
+  "Продолжение первой главы на следующей странице, чтобы её бегущий заголовок " +
+    "встретился не на одной странице, а повторился на каждой.",
   "</Section>",
   '<Page orientation="landscape">',
   `# ${CARD_HEADING}`,
@@ -130,6 +129,12 @@ const RUSSIAN_BOOK = [
     "строка, набранная поперёк повёрнутого листа, шире всего того, что " +
     "помещается на страницах вокруг неё.",
   "</Page>",
+  '<Section columns="1">',
+  `# ${SECOND_HEADING}`,
+  "",
+  "Текст второго раздела, который идёт после листа персонажа: глава " +
+    "продолжается за ним, и её бегущий заголовок должен вернуться.",
+  "</Section>",
   "</Book>",
 ].join("\n");
 
@@ -271,11 +276,19 @@ const printProblems = [];
 if (spreads.length === 0) {
   printProblems.push("the PDF has no text on any page at all");
 }
-// The page is the last block of the book, so it is the last page of it.
-if (turnedPages.length !== 1 || turnedPages[0].number !== spreads.length) {
+// Which printed page is the author's own is read from what it says, not from where
+// it sits: the page carries the heading it opens with, and nothing else in the book
+// does. Counting to a position would make this check agree with itself about where
+// the page landed, and where it landed is part of what is being checked.
+const cardWords = CARD_HEADING.toUpperCase().split(" ");
+const turnedByText = printedPages.findIndex((words) =>
+  cardWords.every((wanted) => words.some((word) => word.text.toUpperCase() === wanted)),
+);
+if (turnedPages.length !== 1 || turnedByText === -1 || turnedPages[0].number !== turnedByText + 1) {
   printProblems.push(
-    `expected the last page (${spreads.length}) alone to be set across a turned sheet, ` +
-      `but the pages set wider than ${across.toFixed(1)}pt were: ` +
+    `expected the page carrying "${CARD_HEADING}" (printed page ` +
+      `${turnedByText === -1 ? "not found" : turnedByText + 1}) alone to be set across a turned ` +
+      `sheet, but the pages set wider than ${across.toFixed(1)}pt were: ` +
       (turnedPages.length === 0 ? "none" : turnedPages.map((p) => p.number).join(", ")),
   );
 }
@@ -303,18 +316,21 @@ console.log(
 );
 
 // The third check: the page carries no running header, and keeps its number
-// (issue #21). A running header names where the reader is in the flow; the last
-// block of this book is a page, which has left the flow, so the chapter the author
-// was writing before it must not be printed over it -- nor must the page's own
-// heading, which would name the reader's place no better.
+// (issue #21). A running header names where the reader is in the flow; a page has
+// left the flow, so the chapter the author was writing around it must not be printed
+// over it -- nor must the page's own heading, which would name the reader's place no
+// better.
 //
 // The oracle is where the words landed and what they say. A running header is the
 // text set in the top margin, above everything else on its page, and it says the
 // heading of the part of the book that page belongs to -- one of the two this file
-// wrote into the source. So the pages before the page are asked for a top line that
-// says one of those headings, and the page is asked for nothing at all in the band
-// those lines occupy. The page number is read the same way from the other end: the
-// bottom line of every page, the page's own, must be its position in the file.
+// wrote into the source. The page sits between those two chapters, so the pages
+// before it are asked for the first chapter's heading and the pages after it for the
+// second one's, each in its own place rather than merely somewhere: a renderer that
+// printed the right two headings in the wrong order would satisfy "both were
+// printed" and still be wrong. The page itself is asked for nothing at all in the
+// band those lines occupy. The page number is read the same way from the other end:
+// the bottom line of every page, the page's own, must be its position in the file.
 const LINE_SLACK_PT = 1;
 
 /** The words of one printed page, gathered into lines by their top edge: words set
@@ -346,26 +362,46 @@ if (pageLines.length < 2 || pageLines.some((lines) => lines.length === 0)) {
   headerProblems.push(`expected a printed book of several pages, all with text on them, and got ${pageLines.length}`);
 }
 
-// The page is the book's last block, so it is the last page of the file, and every
-// page before it is a page of a headed chapter.
-const thePage = pageLines[pageLines.length - 1] ?? [];
-const chapterPages = pageLines.slice(0, -1);
-const chapterHeadings = [asHeader(FIRST_HEADING), asHeader(SECOND_HEADING)];
-const printedHeaders = chapterPages.map((lines, index) => ({ number: index + 1, line: lines[0] }));
-
-for (const { number, line } of printedHeaders) {
-  if (line === undefined || !chapterHeadings.includes(line.text.toUpperCase())) {
-    headerProblems.push(
-      `page ${number} is set under no running header: its topmost line reads ` +
-        `"${line?.text ?? ""}", and neither chapter is called that`,
-    );
-  }
+// Which printed page is the author's own is asked of the file rather than counted
+// to: it is the one carrying the heading the page opens with. Counting to it would
+// make this check agree with itself about where the page went, which is one of the
+// things it is here to find out.
+const cardHeader = asHeader(CARD_HEADING);
+const cardIndex = pageLines.findIndex((lines) => lines.some((line) => line.text.toUpperCase() === cardHeader));
+if (cardIndex === -1) {
+  headerProblems.push(`no printed page carries the heading the page opens with, "${cardHeader}"`);
 }
-// Both chapters have to be reached, or "the header names the chapter the reader is
-// in" is only checked for one of them.
-for (const heading of chapterHeadings) {
-  if (!printedHeaders.some(({ line }) => line !== undefined && line.text.toUpperCase() === heading)) {
-    headerProblems.push(`no page is headed "${heading}", so that chapter's running header was never printed`);
+const thePage = pageLines[cardIndex] ?? [];
+const printedHeaders = [
+  ...pageLines.slice(0, Math.max(cardIndex, 0)).map((lines, index) => ({
+    number: index + 1,
+    line: lines[0],
+    chapter: asHeader(FIRST_HEADING),
+  })),
+  ...pageLines.slice(cardIndex + 1).map((lines, index) => ({
+    number: cardIndex + 2 + index,
+    line: lines[0],
+    chapter: asHeader(SECOND_HEADING),
+  })),
+];
+
+// A page with no chapter on one side of it cannot say whether the header came back
+// after the page, which is half of what "the pages around it keep theirs" claims.
+const before = cardIndex;
+const after = pageLines.length - cardIndex - 1;
+if (cardIndex !== -1 && (before === 0 || after === 0)) {
+  headerProblems.push(
+    `the printed page is not between chapters: ${before} page(s) before it and ${after} after, ` +
+      `so one side of "the pages around it keep their header" is not being read`,
+  );
+}
+
+for (const { number, line, chapter } of printedHeaders) {
+  if (line === undefined || line.text.toUpperCase() !== chapter) {
+    headerProblems.push(
+      `page ${number} is headed "${line?.text ?? ""}", not "${chapter}", so its running ` +
+        `header does not name the chapter that page belongs to`,
+    );
   }
 }
 
@@ -378,10 +414,19 @@ if (intruders.length > 0) {
       intruders.map((line) => `"${line.text}" at ${line.yMin.toFixed(1)}pt`).join(", "),
   );
 }
-// What the page does print, so that "nothing in the header band" is not satisfied by
-// a page that printed nothing at all.
-if (!thePage.some((line) => line.text.toUpperCase() === asHeader(CARD_HEADING))) {
-  headerProblems.push(`the page does not print its own heading "${asHeader(CARD_HEADING)}" anywhere on the sheet`);
+// The band above is a claim about where words landed, and it reads the page against
+// neighbours of a different shape printed on the same sheet. This second claim needs
+// no geometry at all: a running header on this page would repeat the heading the page
+// opens with, because the page's own heading reassigns `current-heading` (issue #18).
+// So that heading appearing twice is the header, wherever on the sheet it landed --
+// and appearing no times is a page that printed nothing, which would satisfy "nothing
+// in the header band" for the wrong reason.
+const cardHeadings = thePage.filter((line) => line.text.toUpperCase() === cardHeader);
+if (cardIndex !== -1 && cardHeadings.length !== 1) {
+  headerProblems.push(
+    `the page prints the heading it opens with ${cardHeadings.length} time(s) rather than once: ` +
+      cardHeadings.map((line) => `"${line.text}" at ${line.yMin.toFixed(1)}pt`).join(", "),
+  );
 }
 
 // The address at the foot of each page, the page's own included.
@@ -401,6 +446,6 @@ if (headerProblems.length > 0) {
 }
 
 console.log(
-  `The page prints no running header where its ${chapterPages.length} neighbours print theirs, ` +
-    `and is numbered ${printedNumbers[printedNumbers.length - 1]} at its foot.`,
+  `The page prints no running header where the ${before} page(s) of the chapter before it and ` +
+    `the ${after} after it print theirs, and it is numbered ${printedNumbers[cardIndex]} at its foot.`,
 );
