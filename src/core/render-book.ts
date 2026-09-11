@@ -32,9 +32,11 @@ const PAGE_NAME_PREFIX = "grimoire-page-";
  *
  * A book's theme (issue #4), when it names one, is embedded the same way: its CSS
  * -- including its own self-hosted `@font-face` rules -- lands verbatim in this
- * `<style>` block, appended last so its rules win the cascade over the plain
- * fallback above them. A themeless book keeps exactly the styling it had before
- * themes existed.
+ * `<style>` block after the plain fallback in the same visual cascade layer, so
+ * its visual rules win. Page size is the exception: a higher-priority ownership
+ * layer holds the Book's declaration because binding the Book is not part of a
+ * Theme's visual identity (issue #28).
+ * A themeless book keeps exactly the styling it had before themes existed.
  */
 export function renderBook(book: Book): string {
   const parsed = parseBook(book.source);
@@ -53,15 +55,19 @@ export function renderBook(book: Book): string {
 <meta charset="utf-8" />
 <title>Grimoire Press</title>
 <style>
+  /* Important declarations reverse cascade-layer order. The Book layer is first
+     so its important sheet geometry outranks every Theme selector, while fallback
+     and Theme visual rules share their own layer and keep ordinary source order. */
+  @layer grimoire-book, grimoire-visuals;
+  @layer grimoire-visuals {
   @page {
-    size: ${parsed.size};
     margin: 16mm;
     /* Page-context properties (unlike body's) are what page margin boxes
        inherit from -- CSS Paged Media has no route from body to a margin
        box -- so the plain fallback typeface for a themeless book has to be
        declared here too, not just on body. A theme overrides this with its
-       own @page block, appended below by the cascade-order convention this
-       file already uses for every other themed rule (see the class docblock). */
+       own @page block below by the cascade-order convention this file uses
+       for visual rules (see the function docblock). */
     font-family: serif;
     font-size: 9pt;
     /* content(): the heading's own rendered text, not a copy an author
@@ -93,16 +99,16 @@ export function renderBook(book: Book): string {
   body { font-family: serif; line-height: 1.5; }
   section { column-gap: 8mm; }
   ${parsed.theme?.css ?? ""}
-  /* A named @page rule beats a theme's unnamed @page whatever the order, because
-     naming the page is more specific -- position is not what protects these, and
-     the file's usual last-wins reading does not apply to them. Kept last anyway,
-     so a later theme cannot look like it is meant to override them.
-
-     What position does not settle: a theme that declared a page size of its own
-     would take the book's, while a turned page is still composed from the size
-     the book declared, so the two would describe different sheets. No theme does
-     today. Issue #28 carries it. */
+  }
+  @layer grimoire-book {
+  /* A Book owns its sheet size (CONTEXT.md). Important within the first layer so
+     a Theme's verbatim CSS cannot override it by importance or page specificity.
+     Oriented named pages share this layer and turn the same Book sheet. */
+  @page { size: ${parsed.size} !important; }
+  /* A named Book-owned rule is more specific than the unnamed Book-owned rule,
+     so an oriented Page turns the sheet without choosing another format. */
   ${pageRules}
+  }
 </style>
 </head>
 <body>
@@ -172,7 +178,7 @@ ${contentHtml}
  * address, not a location in the flow, and the address is still true -- so the page
  * keeps its number, and the counter runs through it because nothing here touches it.
  */
-const NO_RUNNING_HEADER = "@top-center { content: none; }";
+const NO_RUNNING_HEADER = "@top-center { content: none !important; }";
 
 /**
  * What a named page declares of its own (ADR-0007), or the empty string for a
@@ -187,7 +193,9 @@ function renderPageRule(block: BookBlock, pageName: string, bookSize: string): s
       return "";
     case "page": {
       const declarations: string[] = [];
-      if (block.orientation !== undefined) declarations.push(`size: ${sheetTurned(bookSize, block.orientation)};`);
+      if (block.orientation !== undefined) {
+        declarations.push(`size: ${sheetTurned(bookSize, block.orientation)} !important;`);
+      }
       declarations.push(NO_RUNNING_HEADER);
       return `@page ${pageName} { ${declarations.join(" ")} }`;
     }

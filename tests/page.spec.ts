@@ -271,6 +271,9 @@ const proseOnly = (size: string): string =>
     "\n",
   );
 
+const themedProseAroundACard = (pageTag: string): string =>
+  proseAroundACard("A5", pageTag).replace('<Book size="A5">', '<Book size="A5" theme="default-ru">');
+
 const sheetOf = (inspection: PageInspection, pageIndex: number): { width: number; height: number } => {
   const found = inspection.pageSizes[pageIndex];
   if (found === undefined) throw new Error(`the engine reported no page ${pageIndex}`);
@@ -292,6 +295,44 @@ const turned = (sheet: { width: number; height: number }): { width: number; heig
 });
 
 test.describe("a page can be turned while the book keeps its one size", () => {
+  test("a theme cannot replace the book's sheet for sections or pages", async ({ page }) => {
+    await page.goto("/tests/fixtures/harness.html");
+
+    // #given: an A5 book using a theme that tries to bind it at A4, strongly
+    // enough that source order alone cannot protect the book's declaration
+    const conflictingThemeCss = `
+      @page { size: A4 !important; }
+      @page :first { size: A4 !important; }
+    `;
+
+    // #when: the real engine paginates one ordinary page and one turned page
+    // under that theme, alongside the same book with no theme as the sheet oracle
+    const ordinary = await page.evaluate(
+      ({ source, css }) => window.__paginateAndInspect(source, css),
+      { source: themedProseAroundACard("<Page>"), css: conflictingThemeCss },
+    );
+    const landscape = await page.evaluate(
+      ({ source, css }) => window.__paginateAndInspect(source, css),
+      { source: themedProseAroundACard('<Page orientation="landscape">'), css: conflictingThemeCss },
+    );
+    const bookAlone = await page.evaluate((source) => window.__paginateAndInspect(source), proseOnly("A5"));
+
+    // #then: sections and an ordinary page use the Book sheet, while the
+    // landscape page uses that same sheet turned, never the Theme's A4 sheet
+    const sheet = sheetOf(bookAlone, 0);
+    expect({
+      ordinarySection: sheetForLine(ordinary, 3),
+      ordinaryPage: sheetForLine(ordinary, 5),
+      landscapeSection: sheetForLine(landscape, 3),
+      landscapePage: sheetForLine(landscape, 5),
+    }).toEqual({
+      ordinarySection: sheet,
+      ordinaryPage: sheet,
+      landscapeSection: sheet,
+      landscapePage: turned(sheet),
+    });
+  });
+
   test("a landscape page reports the book's own sheet turned, and the pages around it report it upright", async ({
     page,
   }) => {

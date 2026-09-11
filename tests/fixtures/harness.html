@@ -10,6 +10,7 @@
       import { renderBook } from "/src/core/render-book.ts";
       import { paginate } from "/src/adapters/pagination.ts";
       import { printBook } from "/src/adapters/printing.ts";
+      import { defaultRuTheme } from "/src/core/themes/default-ru/theme.ts";
 
       // Issue #6's print seam: two print requests made back-to-back, with no
       // await between them, so the second lands while the first is still in
@@ -131,8 +132,15 @@
       // it with), plus the page count and each page's real rendered size. Tests read
       // these to assert column placement and forced breaks through actual
       // Vivliostyle layout, never by comparing against an expected markup string.
-      window.__paginateAndInspect = async (source) => {
-        const html = renderBook({ source });
+      window.__paginateAndInspect = async (source, extraThemeCss) => {
+        const themeCss = defaultRuTheme.css;
+        if (extraThemeCss !== undefined) defaultRuTheme.css += `\n${extraThemeCss}`;
+        let html;
+        try {
+          html = renderBook({ source });
+        } finally {
+          defaultRuTheme.css = themeCss;
+        }
         const container = document.getElementById("preview");
         const { pageCount, pageSizes } = await paginate(container, html);
 
