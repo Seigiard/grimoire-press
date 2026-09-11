@@ -74,9 +74,10 @@ export function renderBook(book: Book): string {
      nearest preceding structural heading's text into a page-scoped named
      string; @top-center above reads it back. The prose renderer marks only
      headings produced from Markdown, distinguishing the book's structure
-     from raw HTML captions. Scoping those marks to section also keeps a
-     Page's headings from changing the running string after that Page has
-     left the flow (CONTEXT.md).
+     from raw HTML captions. Scoping those marks to the renderer's own
+     Section wrapper also keeps a Page's headings from changing the running
+     string after that Page has left the flow (CONTEXT.md), even when raw
+     HTML inside the Page contains a section element of its own.
 
      This is what CONTEXT.md's Section is short of on its own -- a Section
      only declares column count, never a title -- so the running header
@@ -88,8 +89,8 @@ export function renderBook(book: Book): string {
      an author to declare or get wrong here -- unlike every other attribute
      in this file, this is derived, not declared, so parse-book.ts gains no
      new vocabulary and no new MarkupError case for it. */
-  section h1[data-grimoire-structural-heading],
-  section h2[data-grimoire-structural-heading] { string-set: current-heading content(); }
+  section[data-grimoire-section] h1[data-grimoire-structural-heading],
+  section[data-grimoire-section] h2[data-grimoire-structural-heading] { string-set: current-heading content(); }
   /* Hyphenation is a document-language concern, not a theme one -- CONTEXT.md
      keeps the two separate ("the language attribute switches hyphenation").
      Scoped to "ru" because that is the one case verified through the real
@@ -253,11 +254,13 @@ function sheetTurned(bookSize: string, orientation: PageOrientation): string {
 
 function renderSection(section: Section): string {
   const contentHtml = section.content.map(renderSectionContent).join("\n");
+  // The renderer-owned mark distinguishes book flow from a raw <section> an
+  // author may place inside a Page (ADR-0006) for the running-header rule above.
   // column-fill: auto (rather than the initial "balance") fills a column fully
   // before spilling into the next, so where content lands follows the column order
   // an author reads and writes in, not a height-balancing heuristic that could
   // reshuffle it between columns as unrelated content earlier in the book changes.
-  return `<section data-line="${section.line}" style="column-count: ${section.columns}; column-fill: auto;">
+  return `<section data-grimoire-section data-line="${section.line}" style="column-count: ${section.columns}; column-fill: auto;">
 ${contentHtml}
 </section>`;
 }

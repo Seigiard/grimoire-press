@@ -16,7 +16,7 @@ const TWO_HEADINGS_BOOK = [
   "# First Section",
   "",
   ...Array.from({ length: 10 }, (_, i) => [bigParagraph(i + 1), ""]).flat(),
-  "# Second Section",
+  "## Second Section",
   "",
   ...Array.from({ length: 10 }, (_, i) => [bigParagraph(i + 11), ""]).flat(),
   "</Section>",
@@ -39,23 +39,27 @@ const RAW_HEADING_IN_A_SECTION = [
   "</Book>",
 ].join("\n");
 
-const PAGE_HEADING_BEFORE_UNHEADED_PROSE = [
-  '<Book size="A5">',
-  '<Section columns="1">',
-  "# The preceding chapter",
-  "",
-  "Prose before the character sheet.",
-  "</Section>",
-  "<Page>",
-  "## Character sheet",
-  "",
-  "<h2>Read the Situation</h2>",
-  "</Page>",
-  '<Section columns="1">',
-  "The next section starts with prose rather than a heading.",
-  "</Section>",
-  "</Book>",
-].join("\n");
+const pageHeadingBeforeUnheadedProse = (heading: string): string =>
+  [
+    '<Book size="A5">',
+    '<Section columns="1">',
+    "# The preceding chapter",
+    "",
+    "Prose before the character sheet.",
+    "</Section>",
+    "<Page>",
+    "<section>",
+    "",
+    heading,
+    "",
+    "</section>",
+    "<h2>Read the Situation</h2>",
+    "</Page>",
+    '<Section columns="1">',
+    "The next section starts with prose rather than a heading.",
+    "</Section>",
+    "</Book>",
+  ].join("\n");
 
 /**
  * Consumer: a reader who opens the printed or previewed book partway through
@@ -99,16 +103,21 @@ test.describe("running headers and page numbers", () => {
     expect(pages.map((p) => p.header)).toEqual(["The chapter", "The chapter", "The chapter"]);
   });
 
-  test("headings inside a page do not leak into a later section that starts with prose", async ({ page }) => {
-    await page.goto("/tests/fixtures/harness.html");
+  for (const [level, heading] of [
+    ["h1", "# Character sheet"],
+    ["h2", "## Character sheet"],
+  ] as const) {
+    test(`Markdown ${level} headings inside a raw section in a page do not leak into later prose`, async ({ page }) => {
+      await page.goto("/tests/fixtures/harness.html");
 
-    const pages = await page.evaluate(
-      (source) => window.__paginateAndInspectHeaders(source),
-      PAGE_HEADING_BEFORE_UNHEADED_PROSE,
-    );
+      const pages = await page.evaluate(
+        (source) => window.__paginateAndInspectHeaders(source),
+        pageHeadingBeforeUnheadedProse(heading),
+      );
 
-    expect(pages.map((p) => p.header)).toEqual(["The preceding chapter", undefined, "The preceding chapter"]);
-  });
+      expect(pages.map((p) => p.header)).toEqual(["The preceding chapter", undefined, "The preceding chapter"]);
+    });
+  }
 
   test("each page's printed page number matches its real position among the pages Vivliostyle produced", async ({
     page,
