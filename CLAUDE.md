@@ -6,7 +6,7 @@ Issues live as GitHub issues in `Seigiard/grimoire-press`, managed with the `gh`
 
 ### Triage labels
 
-The five canonical roles, using the default label strings. See `docs/agents/triage-labels.md`.
+The six triage state roles, using the default label strings. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
