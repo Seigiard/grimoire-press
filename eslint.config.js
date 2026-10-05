@@ -7,7 +7,7 @@ export default tseslint.config(
     // scripts/ holds standalone Node tools run directly with `node`, never
     // imported by the app or bundled by Vite, so the app-focused rules here
     // (the DOM-global ban, the boundaries rule) have no business policing them.
-    ignores: ["dist/**", "node_modules/**", "playwright-report/**", "test-results/**", "scripts/**"],
+    ignores: ["dist/**", "node_modules/**", "playwright-report/**", "test-results/**", "scripts/**", "tools/oxlint/anti-slop/**"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
